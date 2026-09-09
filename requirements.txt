@@ -1,0 +1,27 @@
+# Interfaz
+streamlit
+
+# RAG / orquestación
+langchain
+langchain-community
+langchain-text-splitters
+
+# LLM: SDK oficial de Google para Gemini (llm/client.py llama directo, sin
+# pasar por la abstracción de LangChain — mantiene el wrapper simple)
+google-genai
+
+# Vector store
+chromadb
+
+# Embeddings locales (gratis, sin llamadas a API)
+sentence-transformers
+
+# Parsing de PDF (Manual BAES, Resolución DN-00556)
+pypdf
+
+# Datos tabulares (comercios) y config
+pandas
+python-dotenv
+
+# Testing
+pytest

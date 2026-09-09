@@ -1,0 +1,16 @@
+id,nombre_comercio,categoria,comuna,restricciones,fecha_actualizacion
+1,Jumbo Providencia,Supermercado,Providencia,"No alcohol, no tabaco, no fármacos",2026-08-15
+2,Líder Ñuñoa,Supermercado,Ñuñoa,"No alcohol, no tabaco, no fármacos",2026-08-15
+3,Santa Isabel Estación Central,Supermercado,Estación Central,"No alcohol, no tabaco, no fármacos",2026-08-15
+4,Unimarc San Miguel,Supermercado,San Miguel,"No alcohol, no tabaco, no fármacos",2026-08-15
+5,Tottus Maipú,Supermercado,Maipú,"No alcohol, no tabaco, no fármacos",2026-08-15
+6,OK Market Macul,Almacén/conveniencia,Macul,"No alcohol, no tabaco, no fármacos",2026-08-15
+7,McDonald's Alameda,Comida rápida,Santiago Centro,"Solo alimentos, no promociones con juguetes de por sí",2026-08-15
+8,Subway Providencia,Comida rápida,Providencia,Solo alimentos,2026-08-15
+9,Doggis Ñuñoa,Comida rápida,Ñuñoa,Solo alimentos,2026-08-15
+10,Copec Pronto Macul,Conveniencia (bencinera),Macul,"No alcohol, no tabaco, no fármacos, no combustible",2026-08-15
+11,Farmacias Cruz Verde,Farmacia,Varias comunas,No habilitado para BAES (solo alimentación),2026-08-15
+12,Panadería San Camilo,Almacén/panadería,Santiago Centro,Solo alimentos,2026-08-01
+13,Acuenta La Florida,Supermercado,La Florida,"No alcohol, no tabaco, no fármacos",2026-08-15
+14,Ekono Peñalolén,Supermercado,Peñalolén,"No alcohol, no tabaco, no fármacos",2026-08-15
+15,Almacén Don Pedro,Almacén de barrio,Independencia,Solo alimentos,2026-07-20
