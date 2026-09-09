@@ -9,21 +9,21 @@ o complejas.
 - Una API key gratuita de Google AI Studio: https://aistudio.google.com/apikey
 
 ## Instalación
-\`\`\`bash
+```bash
 pip install -r requirements.txt
 cp .env.example .env
 # pega tu GOOGLE_API_KEY en .env
-\`\`\`
+```
 
 ## Construir el índice (una sola vez)
-\`\`\`bash
+```bash
 python scripts/ingest_all.py
-\`\`\`
+```
 
 ## Ejecutar
-\`\`\`bash
+```bash
 python -m streamlit run app.py --server.fileWatcherType none
-\`\`\`
+```
 Se abre automáticamente en el navegador, en `localhost:8501`.
 
 **Nota:** se usa `python -m streamlit` en vez de `streamlit` directo porque en
