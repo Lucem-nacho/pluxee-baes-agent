@@ -12,6 +12,16 @@ completa, restricciones incluidas — porque el comercio existe en el listado;
 decidir qué decir al respecto es responsabilidad de quien consume el
 resultado (el generador), no de esta consulta.
 
+Cada llamada a `consultar_comercio` abre su propia conexión sqlite en
+memoria, la usa y la cierra — NO se comparte una conexión global entre
+llamadas. SQLite no permite reutilizar una misma conexión desde un hilo
+distinto al que la creó, y Streamlit ejecuta cada interacción del usuario en
+su propio hilo (`sqlite3.ProgrammingError: SQLite objects created in a
+thread can only be used in that same thread` — encontrado en uso real de la
+app). Con 15 filas, recargar el CSV en cada consulta es insignificante en
+costo; como beneficio adicional, un cambio en comercios.csv se refleja de
+inmediato sin reiniciar el proceso, sin necesidad de recargar nada a mano.
+
 Ver `rag/loaders/comercios_scraper.py` para el punto de extensión futuro
 (reemplazar el CSV simulado por datos reales del buscador de Pluxee).
 """
@@ -24,18 +34,10 @@ from config import settings
 
 TABLA = "comercios"
 
-# Conexión en memoria, cargada de forma perezosa (mismo patrón que el modelo
-# de embeddings en rag/retrieval/vector_retriever.py) — se reconstruye solo
-# si se llama explícitamente a cargar_tabla_comercios() de nuevo.
-_conn: sqlite3.Connection | None = None
 
-
-def cargar_tabla_comercios(csv_path: str | Path = settings.COMERCIOS_CSV_PATH) -> None:
-    """Carga el CSV a una tabla sqlite en memoria, reemplazando cualquier
-    carga previa. Separado de `consultar_comercio` para poder recargar el
-    dataset (ej. tras actualizar comercios.csv) sin reiniciar el proceso."""
-    global _conn
-
+def _construir_conexion(csv_path: str | Path) -> sqlite3.Connection:
+    """Abre una conexión sqlite en memoria NUEVA, crea la tabla y carga el
+    CSV completo. Quien la llama es responsable de cerrarla."""
     conn = sqlite3.connect(":memory:")
     conn.execute(
         f"""
@@ -63,13 +65,16 @@ def cargar_tabla_comercios(csv_path: str | Path = settings.COMERCIOS_CSV_PATH) -
         ]
     conn.executemany(f"INSERT INTO {TABLA} VALUES (?, ?, ?, ?, ?, ?)", filas)
     conn.commit()
-    _conn = conn
+    return conn
 
 
-def _get_conn() -> sqlite3.Connection:
-    if _conn is None:
-        cargar_tabla_comercios()
-    return _conn
+def cargar_tabla_comercios(csv_path: str | Path = settings.COMERCIOS_CSV_PATH) -> None:
+    """Valida que el CSV cargue sin errores (usado por scripts/ingest_all.py
+    como chequeo de sanidad al preparar el proyecto). No deja ningún estado
+    en memoria para llamadas futuras: `consultar_comercio` vuelve a cargar
+    el CSV por su cuenta en cada llamada de todas formas."""
+    conn = _construir_conexion(csv_path)
+    conn.close()
 
 
 def consultar_comercio(nombre_o_categoria: str) -> list[dict]:
@@ -78,16 +83,19 @@ def consultar_comercio(nombre_o_categoria: str) -> list[dict]:
     acentos, ej. "lider" no matchea "Líder", limitación aceptada dado el
     tamaño del dataset). Devuelve la fila completa como dict, o [] si no hay
     coincidencias."""
-    conn = _get_conn()
-    termino = f"%{nombre_o_categoria}%"
-    cursor = conn.execute(
-        f"""
-        SELECT id, nombre_comercio, categoria, comuna, restricciones, fecha_actualizacion
-        FROM {TABLA}
-        WHERE nombre_comercio LIKE ? COLLATE NOCASE
-           OR categoria LIKE ? COLLATE NOCASE
-        """,
-        (termino, termino),
-    )
-    columnas = [d[0] for d in cursor.description]
-    return [dict(zip(columnas, fila)) for fila in cursor.fetchall()]
+    conn = _construir_conexion(settings.COMERCIOS_CSV_PATH)
+    try:
+        termino = f"%{nombre_o_categoria}%"
+        cursor = conn.execute(
+            f"""
+            SELECT id, nombre_comercio, categoria, comuna, restricciones, fecha_actualizacion
+            FROM {TABLA}
+            WHERE nombre_comercio LIKE ? COLLATE NOCASE
+               OR categoria LIKE ? COLLATE NOCASE
+            """,
+            (termino, termino),
+        )
+        columnas = [d[0] for d in cursor.description]
+        return [dict(zip(columnas, fila)) for fila in cursor.fetchall()]
+    finally:
+        conn.close()
