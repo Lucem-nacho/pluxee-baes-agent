@@ -76,6 +76,8 @@ orquestador (ambos de EP1) ya no están en este camino — ver sus propios
 docstrings, actualizados para documentar por qué se mantienen en el
 repositorio sin tocar en vez de borrarse.
 
+![Diagrama de orquestación EP2](orquestacion_ep2.png)
+
 ### Memoria: corto plazo vs. largo plazo
 
 EP2 pide "mecanismos de memoria de corto y largo plazo" como dos cosas

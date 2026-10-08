@@ -62,6 +62,17 @@ por varios segundos antes de que aparezca la interfaz — no es un error).
 - `docs/arquitectura.md` — decisiones de diseño y limitaciones con evidencia,
   EP1 y EP2
 
+## Arquitectura — diagrama de orquestación (EP2)
+
+![Diagrama de orquestación del agente EP2](docs/orquestacion_ep2.png)
+
+El clasificador (sin cambios respecto a EP1) decide INFORMATIVA vs ESCALAR. Si ESCALAR, se
+registra la derivación directo en SQLite (escritura). Si INFORMATIVA, se arma un
+`AgentExecutor` de LangChain con 4 tools (`buscar_normativa`, `buscar_comercio`,
+`consultar_historial`, `escalar_a_ejecutivo`); el LLM decide qué tool invocar, en qué orden y
+cuándo detenerse. Toda interacción resuelta se registra en la memoria de largo plazo antes de
+responder. Detalle completo en `docs/arquitectura.md`.
+
 ## Limitaciones conocidas
 - Nivel gratuito de Gemini: 5 solicitudes/min, 20/día — evitar ráfagas de
   preguntas seguidas. Si aparece un error `429 RESOURCE_EXHAUSTED`, es la
