@@ -6,8 +6,19 @@ langchain
 langchain-community
 langchain-text-splitters
 
-# LLM: SDK oficial de Google para Gemini (llm/client.py llama directo, sin
-# pasar por la abstracción de LangChain — mantiene el wrapper simple)
+# `AgentExecutor` vive en langchain-classic desde LangChain 1.x (ya no está
+# en `langchain.agents`).
+langchain-classic
+
+# Framework de agentes (EP2): AgentExecutor + tool-calling sobre Gemini.
+# Usado SOLO en el camino INFORMATIVA de agent/orchestrator.py — ver
+# docs/arquitectura.md para por qué el clasificador (agent/classifier.py)
+# sigue llamando a Gemini directo vía llm/client.py en vez de pasar por acá.
+langchain-google-genai
+
+# LLM: SDK oficial de Google para Gemini. llm/client.py (clasificador) lo
+# llama directo, sin pasar por LangChain, para mantener el reintento de
+# 503/429 ya probado con llamadas reales (ver llm/client.py).
 google-genai
 
 # Vector store

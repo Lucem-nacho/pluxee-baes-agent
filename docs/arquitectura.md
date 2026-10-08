@@ -35,6 +35,92 @@ etc.), y debe mantener alta fidelidad respecto a la normativa de Junaeb.
 6. Si ESCALAR, `agent/escalation.py` deriva a un ejecutivo humano con el
    contexto de la conversación adjunto.
 
+*(Flujo de EP1. Ver "Flujo — EP2" más abajo para cómo cambian los pasos 3-6
+al agregar framework de agentes, memoria y escritura.)*
+
+## Flujo — EP2 (agente funcional, memoria y escritura)
+
+EP2 pide extender el proyecto de EP1 con cuatro capacidades que el diseño
+original no tenía: un framework de agentes real, memoria de largo plazo,
+una herramienta de escritura, y planificación/decisiones adaptativas. Los
+pasos 1-2 de EP1 (interfaz -> clasificador) no cambian; lo que cambia es
+qué pasa después de clasificar como INFORMATIVA:
+
+1. Interfaz de chat (`app.py`) recibe la consulta — ahora con un
+   `id_usuario` editable en la barra lateral, que identifica la memoria de
+   largo plazo del estudiante (sin ser un login real, ver limitaciones).
+2. `agent/classifier.py` clasifica igual que en EP1, **sin cambios**: sigue
+   siendo el filtro barato antes de invocar nada más costoso — evita gastar
+   un ciclo completo de tool-calling (varias llamadas al LLM) en consultas
+   claramente fuera de alcance.
+3. Si ESCALAR, `memory.store.registrar_escalamiento` persiste la derivación
+   en SQLite (tabla `escalamientos`) — la primera capacidad de ESCRITURA
+   real del agente. En EP1, `agent/escalation.py` armaba el mismo paquete
+   pero se perdía al cerrar la sesión.
+4. Si INFORMATIVA, se arma un `AgentExecutor` de LangChain
+   (`agent/orchestrator.py` + `agent/tools.py`) con 4 tools: `buscar_normativa`
+   (envuelve `rag/retrieval/vector_retriever.py` + `rag/arbitration.py`,
+   igual que el pipeline de EP1), `buscar_comercio` (envuelve
+   `rag/retrieval/comercios_query.py`), `consultar_historial` (memoria de
+   largo plazo, nueva) y `escalar_a_ejecutivo` (escritura, nueva — el
+   agente puede decidir derivar A MITAD de su propio razonamiento, no solo
+   el clasificador de entrada). El LLM decide él mismo qué tools llamar, en
+   qué orden, y cuándo detenerse — a diferencia del camino fijo de EP1
+   (recuperar -> comercios -> arbitrar -> generar, siempre en ese orden).
+5. Toda interacción resuelta (por cualquiera de los dos caminos) se
+   registra en `interacciones` (memoria de largo plazo) antes de devolver
+   el resultado a `app.py`.
+
+`agent/generator.py` y la llamada directa a `rag/arbitration.py` desde el
+orquestador (ambos de EP1) ya no están en este camino — ver sus propios
+docstrings, actualizados para documentar por qué se mantienen en el
+repositorio sin tocar en vez de borrarse.
+
+### Memoria: corto plazo vs. largo plazo
+
+EP2 pide "mecanismos de memoria de corto y largo plazo" como dos cosas
+distintas, así que se implementaron como dos mecanismos genuinamente
+distintos, no una sola tabla con dos nombres:
+
+| | Corto plazo | Largo plazo |
+|---|---|---|
+| Dónde vive | `st.session_state.mensajes` (navegador) | tabla `interacciones` en SQLite (disco) |
+| Sobrevive a | Nada — se pierde al cerrar la pestaña | Cerrar la app, reiniciar el proceso |
+| Quién la usa | El prompt del clasificador (vía `historial_contexto`) | La tool `consultar_historial`, que el LLM decide invocar o no |
+| Identificada por | La sesión del navegador (implícito) | `id_usuario`, que el estudiante escribe a mano |
+
+### Escritura: de EP1 a EP2
+
+En EP1, `agent/escalation.py` devolvía un dict de derivación que `app.py`
+mostraba y se perdía. EP2 pide una herramienta de ESCRITURA real dentro del
+agente — no basta con que el agente "sepa" escalar, tiene que dejar un
+registro persistente de que lo hizo. `memory/store.py` agrega la tabla
+`escalamientos`, con el mismo patrón de conexión por llamada que
+`rag/retrieval/comercios_query.py` ya había resuelto para el problema de
+hilos de Streamlit (ver docstring de `memory/store.py`) — la misma lección
+de EP1, aplicada de nuevo a una base en disco en vez de en memoria.
+
+### Demostración de planificación y decisiones adaptativas (EP2, IE5/IE7)
+
+La diferencia con EP1 no es solo técnica (framework vs. funciones planas):
+es que el mismo agente puede terminar en caminos distintos según lo que
+encuentra, sin que eso esté decidido de antemano:
+
+- Una consulta normativa general solo debería disparar `buscar_normativa`.
+- Una consulta sobre un comercio puntual debería disparar `buscar_comercio`
+  y, razonablemente, también `buscar_normativa` (para cruzar la
+  restricción particular del comercio con la regla general).
+- Una consulta que el clasificador dejó pasar como INFORMATIVA pero que, al
+  investigar, resulta ambigua o contradictoria, puede terminar en
+  `escalar_a_ejecutivo` — una decisión que en EP1 solo podía tomar el
+  clasificador, antes de ver ningún resultado de búsqueda.
+
+`agent/orchestrator.py` expone estos pasos (`resultado["pasos"]`) y
+`app.py` los muestra como nota interna junto a la respuesta, pensado
+específicamente para la demo en vivo que pide la pauta de presentación
+(IE7). Los 4 escenarios de `scripts/check_agent_executor.py` están
+diseñados para mostrar esto con llamadas reales.
+
 ## Stack técnico
 
 | Componente | Elección |
@@ -44,7 +130,9 @@ etc.), y debe mantener alta fidelidad respecto a la normativa de Junaeb.
 | Vector store | ChromaDB, colección `manual_faq_social` (única en esta versión, ver limitaciones) |
 | Tabla estructurada | sqlite3 (stdlib) sobre `data/comercios/comercios.csv` |
 | PDF parsing | `pypdf` |
-| Orquestación | Funciones Python planas (`agent/orchestrator.py`), sin framework de grafos — flujo lineal simple, fácil de depurar/explicar |
+| Orquestación (INFORMATIVA) | **EP2**: `AgentExecutor` de LangChain (`langchain-google-genai` + `langchain.agents`), tool-calling sobre `gemini-3.6-flash` — reemplaza el camino fijo de EP1 (funciones Python planas) |
+| Orquestación (ESCALAR) | Sin cambios respecto a EP1: `agent/classifier.py` decide antes de llegar al agente |
+| Memoria persistente | **EP2**: sqlite3 (stdlib) en disco, `memory/store.py` — tablas `escalamientos` (escritura) e `interacciones` (memoria de largo plazo) |
 | Interfaz | Streamlit |
 
 ## Limitaciones conocidas y extensiones futuras (fuera de alcance de esta versión)
@@ -174,6 +262,82 @@ etc.), y debe mantener alta fidelidad respecto a la normativa de Junaeb.
   no cambió la similitud ni en la 16ª decimal (el tokenizer del modelo ya
   colapsa espacios internamente). Un chunking consciente de tablas (una fila
   = un chunk) resolvería esto, pero queda fuera de alcance por ahora.
+
+## Limitaciones conocidas y extensiones futuras — EP2
+
+- **El código de EP2 no se pudo ejecutar durante el desarrollo**: a
+  diferencia de EP1 (donde todo se probó con llamadas reales a Gemini
+  durante el desarrollo), el entorno donde se escribieron
+  `agent/tools.py`, `agent/orchestrator.py` y los cambios a `app.py` no
+  tenía acceso a internet para instalar `langchain` / `langchain-google-genai`.
+  Lo que SÍ se probó ahí mismo, con datos reales y sin depender de ningún
+  paquete externo (sqlite3 es stdlib): `memory/store.py` completo — 10
+  pruebas unitarias (`tests/test_memory_store.py`) más una prueba de
+  concurrencia multi-hilo con 20 escrituras simultáneas, mismo patrón que
+  ya se había verificado para `comercios_query.py` en EP1.
+  - **Primera ejecución real (2026-10-08, LangChain 1.4.0 +
+    langchain-google-genai 4.4.0 + Gemini)** — encontró 4 problemas que
+    ninguna prueba sin red podía ver, todos corregidos:
+    1. `from langchain.agents import AgentExecutor` no existe en LangChain
+       1.x (se movió a `langchain-classic`) → import corregido y paquete
+       agregado a `requirements.txt`.
+    2. El contenido final del agente puede llegar como lista de bloques, no
+       `str`, y SQLite lo rechazaba (`ProgrammingError`) →
+       `_texto_de_salida` en `agent/orchestrator.py`.
+    3. Ante una pregunta que el manual no cubre (bebidas energéticas), el
+       agente reformulaba la búsqueda en bucle hasta agotar iteraciones, y
+       la librería devolvía el texto interno `"Agent stopped due to max
+       iterations."` (que se habría mostrado al estudiante y guardado en la
+       memoria) → regla 5 en `prompts/agente.py` (máx. 2 búsquedas) y
+       degradación a un mensaje honesto de "no encontré información" si
+       igual se agota el límite.
+    4. El clasificador (prompt de EP1) mandaba "¿Qué te pregunté la última
+       vez?" a ESCALAR por "ambigua", así que la memoria de largo plazo era
+       inalcanzable → ampliación mínima de `prompts/clasificador.py`.
+    Además, el agente ignoraba `buscar_comercio` al nombrar un comercio
+    (respondía solo con la norma general, lo que daría respuestas erróneas
+    para comercios con restricción propia) → regla 6 en `prompts/agente.py`.
+    Cubierto con 6 pruebas offline permanentes en `tests/test_orchestrator.py`
+    (modelo falso, sin cuota).
+  - **Verificación real de los 4 escenarios de `scripts/check_agent_executor.py`**:
+    `normativa`, `comercio` y `escalamiento` OK con Gemini real.
+    `memoria` quedó **parcial**: tras el arreglo del clasificador, la
+    consulta pasó a la ruta del agente (la cuota se agotó justo ahí), pero
+    NO está confirmado con Gemini real que el agente elija
+    `consultar_historial`; la tool en sí sí está probada offline y solo lee
+    el `id_usuario` de la sesión. Pendiente de re-correr con cuota.
+  - Los escenarios se ejecutaron con `GEMINI_MODEL=gemini-flash-latest`
+    como sobreescritura temporal por variable de entorno, porque la cuota
+    diaria de `gemini-3.6-flash` (default del proyecto) se había agotado
+    durante el diagnóstico. Valida el código, no necesariamente el
+    comportamiento exacto de `gemini-3.6-flash`.
+- **`id_usuario` no es autenticación real**: es un string que el estudiante
+  escribe libremente en la barra lateral de `app.py`. Cualquiera que
+  escriba el mismo `id_usuario` puede leer ese historial. Suficiente para
+  demostrar memoria de largo plazo en un contexto académico, no para
+  producción — ver docstring de `memory/store.py`.
+- **Dos mecanismos de reintento distintos para el mismo LLM**: el
+  clasificador (`llm/client.py`) tiene el manejo de 503/429 probado con
+  llamadas reales en EP1 (espera el `retryDelay` exacto que devuelve la
+  API). El `AgentExecutor` usa `ChatGoogleGenerativeAI` de
+  `langchain-google-genai` directamente, con su propio `max_retries` — no
+  pasa por `llm/client.py`, así que no hereda ese comportamiento
+  específico. Unificar ambos caminos bajo un solo wrapper queda como
+  mejora futura.
+- **`MAX_ITERACIONES_AGENTE=6`** (`agent/orchestrator.py`): medido contra
+  casos reales, SÍ se alcanzaba en una consulta fuera de cobertura (ver
+  punto 3 arriba). Con la regla de máx. 2 búsquedas, los escenarios
+  `normativa` y `comercio` terminaron en 2 llamadas a tools. Cada consulta
+  informativa cuesta ~3-4 requests a Gemini (clasificador + 2-3 del
+  agente), así que el free tier de 20/día alcanza para unas 5-6 consultas
+  por modelo — recordarlo para la demo en vivo.
+- **Errores de cuota/servidor en la ruta del agente no se manejan**: un 429
+  o un 503 persistente en `ChatGoogleGenerativeAI` (observados ambos
+  durante la verificación) propaga la excepción y `app.py` mostraría un
+  traceback al estudiante. Lo mismo ocurre con el clasificador si agota sus
+  reintentos. Aceptado por ahora; mejora futura: capturar en
+  `agent/orchestrator.py` y responder con un mensaje de "servicio no
+  disponible, intenta en unos minutos".
 
 ## Fuentes reales usadas
 

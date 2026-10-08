@@ -27,5 +27,8 @@ CHROMA_PERSIST_DIR = os.getenv("CHROMA_PERSIST_DIR", "data/processed/chroma")
 COLLECTION_MANUAL_FAQ_SOCIAL = "manual_faq_social"
 COLLECTION_NORMATIVA_JUNAEB = "normativa_junaeb"
 
+# --- Memoria persistente (EP2): escalamientos + memoria de largo plazo ---
+MEMORIA_DB_PATH = os.getenv("MEMORIA_DB_PATH", "data/processed/memoria.db")
+
 # --- Fuente estructurada (comercios) ---
 COMERCIOS_CSV_PATH = "data/comercios/comercios.csv"

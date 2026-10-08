@@ -12,7 +12,10 @@ Clasifica la consulta del estudiante en una de estas dos categorías:
 
 - INFORMATIVA: preguntas sobre qué productos o comercios están permitidos, \
 restricciones de uso, cobertura de la beca, funcionamiento general del \
-beneficio.
+beneficio. También son INFORMATIVAS las preguntas sobre las consultas \
+anteriores del propio estudiante en este canal (qué preguntó antes, si ya \
+consultó algo): el asistente puede revisar ese historial, y eso no es una \
+acción sobre la cuenta.
 - ESCALAR: solicitudes que impliquen acciones sobre la cuenta (recuperar \
 clave, modificar saldo, reportar un cobro no reconocido), reclamos \
 formales, o consultas ambiguas que no calcen claramente en INFORMATIVA.
@@ -23,6 +26,9 @@ Categoría: INFORMATIVA
 
 Consulta: "Me cobraron dos veces en el mismo local, ¿me pueden devolver la plata?"
 Categoría: ESCALAR
+
+Consulta: "¿Sobre qué te consulté ayer?"
+Categoría: INFORMATIVA
 
 Consulta del estudiante: "{consulta_usuario}"
 Historial de la conversación: "{historial_contexto}"
