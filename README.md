@@ -66,7 +66,7 @@ por varios segundos antes de que aparezca la interfaz — no es un error).
 
 ![Diagrama de orquestación del agente EP2](docs/orquestacion_ep2.png)
 
-El clasificador (sin cambios respecto a EP1) decide INFORMATIVA vs ESCALAR. Si ESCALAR, se
+El clasificador (misma lógica de EP1; su prompt se amplió en EP2 para no bloquear la memoria de largo plazo) decide INFORMATIVA vs ESCALAR. Si ESCALAR, se
 registra la derivación directo en SQLite (escritura). Si INFORMATIVA, se arma un
 `AgentExecutor` de LangChain con 4 tools (`buscar_normativa`, `buscar_comercio`,
 `consultar_historial`, `escalar_a_ejecutivo`); el LLM decide qué tool invocar, en qué orden y

@@ -49,7 +49,8 @@ qué pasa después de clasificar como INFORMATIVA:
 1. Interfaz de chat (`app.py`) recibe la consulta — ahora con un
    `id_usuario` editable en la barra lateral, que identifica la memoria de
    largo plazo del estudiante (sin ser un login real, ver limitaciones).
-2. `agent/classifier.py` clasifica igual que en EP1, **sin cambios**: sigue
+2. `agent/classifier.py` clasifica igual que en EP1 en su lógica (su prompt
+   se amplió en EP2, ver hallazgo #4 más abajo): sigue
    siendo el filtro barato antes de invocar nada más costoso — evita gastar
    un ciclo completo de tool-calling (varias llamadas al LLM) en consultas
    claramente fuera de alcance.
@@ -132,8 +133,8 @@ diseñados para mostrar esto con llamadas reales.
 | Vector store | ChromaDB, colección `manual_faq_social` (única en esta versión, ver limitaciones) |
 | Tabla estructurada | sqlite3 (stdlib) sobre `data/comercios/comercios.csv` |
 | PDF parsing | `pypdf` |
-| Orquestación (INFORMATIVA) | **EP2**: `AgentExecutor` de LangChain (`langchain-google-genai` + `langchain.agents`), tool-calling sobre `gemini-3.6-flash` — reemplaza el camino fijo de EP1 (funciones Python planas) |
-| Orquestación (ESCALAR) | Sin cambios respecto a EP1: `agent/classifier.py` decide antes de llegar al agente |
+| Orquestación (INFORMATIVA) | **EP2**: `AgentExecutor` de LangChain (`langchain-google-genai` + `langchain_classic.agents`), tool-calling sobre `gemini-3.6-flash` — reemplaza el camino fijo de EP1 (funciones Python planas) |
+| Orquestación (ESCALAR) | Misma lógica que EP1: `agent/classifier.py` decide antes de llegar al agente (su prompt se amplió en EP2, ver hallazgo #4); la derivación ahora se persiste en SQLite |
 | Memoria persistente | **EP2**: sqlite3 (stdlib) en disco, `memory/store.py` — tablas `escalamientos` (escritura) e `interacciones` (memoria de largo plazo) |
 | Interfaz | Streamlit |
 
