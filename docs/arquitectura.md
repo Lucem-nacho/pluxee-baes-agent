@@ -187,11 +187,15 @@ diseñados para mostrar esto con llamadas reales.
   estudiante preguntó por bebidas energéticas: el agente respondió que las
   fuentes no lo cubrían — lo cual era fiel a ellas — en vez de inventar una
   regla.
-  - **Cómo se resolvió**: no con la colección completa, sino con una entrada
-    de FAQ (`data/faq/faq_baes.json`) basada en la ficha oficial de
+  - **Cómo se resolvió**: no con la colección completa, sino con entradas
+    de FAQ (`data/faq/faq_baes.json`) basadas en la ficha oficial de
     ChileAtiende ("Beca de Alimentación para la Educación Superior"): en
     supermercados se pueden comprar alimentos con hasta 2 sellos "Alto en";
     no alcohol, cigarrillos, fármacos ni productos que no sean alimentos.
+    Son dos entradas con el mismo contenido y distinta redacción de la
+    pregunta (la primera, genérica sobre sellos; la segunda, nombrando
+    bebidas energéticas, gaseosas y snacks), agregada después para mejorar
+    la recuperación (ver "Matiz de recuperación" más abajo).
     Por eso `normativa_junaeb` sigue sin construirse: la Ley 20.606 completa
     no está indexada, solo esta regla.
   - **Conflicto entre fuentes, resuelto por jerarquía**: la ficha oficial de
@@ -204,13 +208,34 @@ diseñados para mostrar esto con llamadas reales.
     con Gemini real (2026-10-21): el agente cita la regla de ChileAtiende, dice
     que las fuentes no nombran las bebidas energéticas y sugiere consultar a un
     ejecutivo, sin inventar.
-  - **Matiz de recuperación (medido, índice de 178 fragmentos)**: la pregunta
-    literal "¿Puedo comprar bebidas energéticas con mi BAES?" NO recupera esta
-    entrada (puesto 11); la recuperan las reformulaciones del agente
-    ("bebidas energeticas" en el puesto 2 de 4; las que incluyen "sellos", en el
-    1). Funciona porque el agente reformula antes de buscar (hasta 2
-    búsquedas), no porque el embedding local conecte "energéticas" con
-    "sellos" — una pregunta formulada distinto podría no recuperarla.
+  - **Matiz de recuperación (medido sin Gemini, con el embedding local)**:
+    con solo la primera entrada (índice de 178 fragmentos), la pregunta
+    literal "¿Puedo comprar bebidas energéticas con mi BAES?" NO la
+    recuperaba (puesto 11 de 178, fuera del top-4); la recuperaban las
+    reformulaciones del agente ("bebidas energeticas" en el puesto 2 de 4; las
+    que incluyen "sellos", en el 1). Funcionaba porque el agente reformula
+    antes de buscar (hasta 2 búsquedas), no porque el embedding conecte
+    "energéticas" con "sellos".
+    - **Segunda entrada (2026-10-21, índice de 180 fragmentos)**: con una
+      pregunta redactada con las palabras que usa el estudiante, la pregunta
+      literal pasó a recuperarla en el **puesto 1 de 180** (la entrada
+      original queda en el 12). Puestos de la entrada nueva con otras
+      redacciones: "bebidas energeticas" 1; las reformulaciones reales del
+      agente 1 (las tres); "¿Puedo comprar snacks o papas fritas con la
+      BAES?" 1; "¿Qué productos puedo comprar con la BAES?" 1; "¿Puedo comprar
+      gaseosas con la BAES?" 4 (justo en el límite del top-4). Control: con
+      "¿Puedo comprar alcohol con la BAES?" queda en el 6, fuera del top-4,
+      así que no desplaza a la entrada de alcohol.
+    - **Las dos entradas coexisten**: su similitud coseno es 0.806, bajo
+      `UMBRAL_MISMO_TEMA=0.9`, así que el arbitraje no las agrupa y las dos
+      llegan al agente como `vigente` (medido con "bebidas energeticas":
+      4 recuperados, 4 vigentes, 0 históricos).
+    - **Límites de esta medición**: es recuperación, no una corrida con
+      Gemini; y la mejora es específica de la redacción — cubre bebidas
+      energéticas, gaseosas y snacks, que es lo que nombra la pregunta. Un
+      producto distinto (p. ej. "cereales", "galletas") depende de que la
+      redacción del estudiante se parezca a alguna de las dos preguntas o de
+      que el agente reformule.
   Mismo patrón que `rag/loaders/comercios_scraper.py` y `agent/validator.py`:
   documentada como decisión de alcance, no como funcionalidad pendiente por
   olvido — pero esta decisión se revisó al encontrar un vacío real.
