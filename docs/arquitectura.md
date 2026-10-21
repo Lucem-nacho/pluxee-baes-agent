@@ -376,7 +376,9 @@ diseñados para mostrar esto con llamadas reales.
       la cuota se agotó justo ahí y no se pudo confirmar que el agente
       eligiera `consultar_historial` (la tool en sí estaba probada offline y
       solo lee el `id_usuario` de la sesión).
-    - **2026-10-21 (cuota repuesta) — cierra el pendiente**:
+    - **2026-10-21 (cuota repuesta) — cierra el pendiente**. Estas corridas
+      se hicieron con `gemini-3.6-flash`, el default del proyecto, sin
+      sobreescritura de modelo:
       - `memoria`: el clasificador dejó pasar "¿Qué te pregunté la última
         vez?" como INFORMATIVA. El agente llamó solo a
         `consultar_historial({})` y recuperó las dos consultas anteriores del
@@ -389,8 +391,10 @@ diseñados para mostrar esto con llamadas reales.
   - Las corridas del 2026-10-08 se ejecutaron con
     `GEMINI_MODEL=gemini-flash-latest` como sobreescritura temporal por
     variable de entorno, porque la cuota diaria de `gemini-3.6-flash`
-    (default del proyecto) se había agotado durante el diagnóstico. Valida el
-    código, no necesariamente el comportamiento exacto de `gemini-3.6-flash`.
+    (default del proyecto) se había agotado durante el diagnóstico. Esas
+    corridas validan el código, no necesariamente el comportamiento exacto de
+    `gemini-3.6-flash`; eso lo cubren las del 2026-10-21, hechas con el
+    modelo por defecto.
 - **`id_usuario` no es autenticación real**: es un string que el estudiante
   escribe libremente en la barra lateral de `app.py`. Cualquiera que
   escriba el mismo `id_usuario` puede leer ese historial. Suficiente para
