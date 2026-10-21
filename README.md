@@ -31,8 +31,9 @@ sesión nueva para que el agente pueda referenciar tus consultas anteriores
 (memoria de largo plazo, ver `docs/arquitectura.md`).
 
 ## Verificar el agente (EP2)
-Antes de confiar en que el AgentExecutor funciona, corre al menos un
-escenario real (consume cuota de Gemini, ver limitaciones):
+Para reconfirmar el AgentExecutor de punta a punta (por ejemplo, tras cambiar
+prompts o tools), corre un escenario real — consume cuota de Gemini, ver
+limitaciones:
 ```bash
 python scripts/check_agent_executor.py --escenario normativa
 ```
@@ -85,11 +86,9 @@ responder. Detalle completo en `docs/arquitectura.md`.
 - El identificador de usuario de la memoria de largo plazo (barra lateral)
   no es autenticación real — cualquiera que lo escriba puede ver ese
   historial. Ver `docs/arquitectura.md`.
-- El código de EP2 (`agent/tools.py`, `agent/orchestrator.py`) se escribió
-  sin poder instalar `langchain`/`langchain-google-genai` en el entorno de
-  desarrollo — **correr `scripts/check_agent_executor.py` antes de la
-  presentación** para confirmar que compila y funciona con llamadas reales.
-  `memory/store.py` sí se probó completo (ver `tests/test_memory_store.py`).
+- Los 4 escenarios de `scripts/check_agent_executor.py` (normativa, comercio,
+  escalamiento, memoria) se verificaron con Gemini real; detalle en
+  `docs/arquitectura.md`.
 
 ## Uso de IA
 Se usó Claude para apoyo en redacción de código, diagramas y documentación

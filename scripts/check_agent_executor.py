@@ -2,12 +2,13 @@
 completo (clasificador -> tools -> respuesta) funciona end-to-end con
 llamadas reales a Gemini.
 
-IMPORTANTE, a diferencia de `scripts/check_llm_connection.py`: este script
-NO se pudo ejecutar durante el desarrollo porque el entorno donde se
-escribió el código (sandbox en la nube) no tenía acceso a internet para
-instalar `langchain`/`langchain-google-genai`. Corre esto ANTES de confiar
-en que `agent/orchestrator.py` y `agent/tools.py` compilan y funcionan de
-verdad — si algo falla, el error va a decir exactamente qué línea revisar.
+Historia: el código de `agent/orchestrator.py` y `agent/tools.py` se escribió
+en un entorno sin acceso a internet, así que este script no pudo correrse
+durante el desarrollo. Ya se ejecutó y los 4 escenarios quedaron verificados
+con Gemini real (2026-10-08 y 2026-10-21; la primera corrida encontró 4
+problemas reales, todos corregidos — detalle en `docs/arquitectura.md`).
+Sigue siendo la forma de reconfirmarlo tras cambiar prompts, tools o la
+versión de LangChain: si algo falla, el error dice qué línea revisar.
 
 Tampoco es un test de pytest, por la misma razón que el script de EP1: hace
 llamadas de red reales y consume cuota, así que no debe correr en una suite

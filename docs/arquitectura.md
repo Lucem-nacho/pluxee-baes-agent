@@ -323,7 +323,8 @@ diseñados para mostrar esto con llamadas reales.
 
 ## Limitaciones conocidas y extensiones futuras — EP2
 
-- **El código de EP2 no se pudo ejecutar durante el desarrollo**: a
+- **El código de EP2 no se pudo ejecutar durante el desarrollo** (historia;
+  ya se ejecutó y verificó con Gemini real, ver más abajo): a
   diferencia de EP1 (donde todo se probó con llamadas reales a Gemini
   durante el desarrollo), el entorno donde se escribieron
   `agent/tools.py`, `agent/orchestrator.py` y los cambios a `app.py` no
@@ -367,18 +368,29 @@ diseñados para mostrar esto con llamadas reales.
     para comercios con restricción propia) → regla 6 en `prompts/agente.py`.
     Cubierto con 6 pruebas offline permanentes en `tests/test_orchestrator.py`
     (modelo falso, sin cuota).
-  - **Verificación real de los 4 escenarios de `scripts/check_agent_executor.py`**:
-    `normativa`, `comercio` y `escalamiento` OK con Gemini real.
-    `memoria` quedó **parcial**: tras el arreglo del clasificador, la
-    consulta pasó a la ruta del agente (la cuota se agotó justo ahí), pero
-    NO está confirmado con Gemini real que el agente elija
-    `consultar_historial`; la tool en sí sí está probada offline y solo lee
-    el `id_usuario` de la sesión. Pendiente de re-correr con cuota.
-  - Los escenarios se ejecutaron con `GEMINI_MODEL=gemini-flash-latest`
-    como sobreescritura temporal por variable de entorno, porque la cuota
-    diaria de `gemini-3.6-flash` (default del proyecto) se había agotado
-    durante el diagnóstico. Valida el código, no necesariamente el
-    comportamiento exacto de `gemini-3.6-flash`.
+  - **Verificación real de los 4 escenarios de `scripts/check_agent_executor.py`
+    — los 4 confirmados con Gemini real (2026-10-21)**:
+    - **2026-10-08 (primera ejecución)**: `normativa`, `comercio` y
+      `escalamiento` OK. `memoria` quedó **parcial** por cuota agotada: tras
+      el arreglo del clasificador la consulta pasó a la ruta del agente, pero
+      la cuota se agotó justo ahí y no se pudo confirmar que el agente
+      eligiera `consultar_historial` (la tool en sí estaba probada offline y
+      solo lee el `id_usuario` de la sesión).
+    - **2026-10-21 (cuota repuesta) — cierra el pendiente**:
+      - `memoria`: el clasificador dejó pasar "¿Qué te pregunté la última
+        vez?" como INFORMATIVA. El agente llamó solo a
+        `consultar_historial({})` y recuperó las dos consultas anteriores del
+        mismo `id_usuario`: el cobro duplicado (derivado a un ejecutivo) y la
+        compra de alcohol en el Jumbo.
+      - `comercio`: llamó a `buscar_normativa` y a `buscar_comercio` y cruzó
+        ambas fuentes en la respuesta.
+      - `escalamiento`: el clasificador derivó antes de llegar al agente (sin
+        gastar llamadas de tool-calling), con `Registro #3`.
+  - Las corridas del 2026-10-08 se ejecutaron con
+    `GEMINI_MODEL=gemini-flash-latest` como sobreescritura temporal por
+    variable de entorno, porque la cuota diaria de `gemini-3.6-flash`
+    (default del proyecto) se había agotado durante el diagnóstico. Valida el
+    código, no necesariamente el comportamiento exacto de `gemini-3.6-flash`.
 - **`id_usuario` no es autenticación real**: es un string que el estudiante
   escribe libremente en la barra lateral de `app.py`. Cualquiera que
   escriba el mismo `id_usuario` puede leer ese historial. Suficiente para
