@@ -4,7 +4,9 @@ Colección "manual_faq_social": manual BAES + resolución + FAQ + tweets
 normativos filtrados (`rag/loaders/social_loader.py`, mock de Twitter/X).
 
 La colección "normativa_junaeb" (Ley de Etiquetado / normativa externa) no
-se construye todavía: se determinó redundante con el manual (ver
+se construye: era redundante con el manual solo para alcohol/tabaco/
+fármacos; la regla de sellos "Alto en" (Ley 20.606) sí faltaba y se cubrió
+con una entrada de FAQ en vez de la colección completa (ver
 docs/arquitectura.md).
 
 Filtro explícito: se excluye el chunk de la página 2 del manual (el índice

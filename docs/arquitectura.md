@@ -176,14 +176,44 @@ diseñados para mostrar esto con llamadas reales.
     proyecto si ocurre en la presentación.
 
 - **Colección "normativa_junaeb" (normativa Junaeb / Ley de Etiquetado
-  externa)**: no se implementa en esta versión. Al revisar el manual real,
-  su tabla de causales de pérdida (`Tabla N°15`, ver `docs/arquitectura.md`
-  → "Fuentes reales usadas") ya cubre las restricciones de productos
-  (alcohol, tabaco, fármacos) que era justo el tipo de contenido que esta
-  fuente externa iba a aportar — se determinó redundante con el contenido
-  ya indexado desde el manual, no un vacío real de cobertura. Mismo patrón
-  que `rag/loaders/comercios_scraper.py` y `agent/validator.py`: documentada
-  como decisión de alcance, no como funcionalidad pendiente por olvido.
+  externa)**: no se implementa en esta versión (no existe la colección ni
+  su loader). **Corrección (2026-10-21) a la decisión original de EP1**, que
+  la descartó como "redundante con el manual": eso solo era cierto para
+  alcohol, tabaco y fármacos, cuya prohibición sí está en la tabla de
+  causales de pérdida del manual (`Tabla N°15`). **No lo era para la regla
+  de sellos de advertencia "Alto en" (Ley N° 20.606)**, que no aparece en el
+  manual, la resolución, la FAQ ni los tweets (búsqueda textual de "sello",
+  "etiquetado", "energética" y "bebida" sin resultados). Se detectó cuando un
+  estudiante preguntó por bebidas energéticas: el agente respondió que las
+  fuentes no lo cubrían — lo cual era fiel a ellas — en vez de inventar una
+  regla.
+  - **Cómo se resolvió**: no con la colección completa, sino con una entrada
+    de FAQ (`data/faq/faq_baes.json`) basada en la ficha oficial de
+    ChileAtiende ("Beca de Alimentación para la Educación Superior"): en
+    supermercados se pueden comprar alimentos con hasta 2 sellos "Alto en";
+    no alcohol, cigarrillos, fármacos ni productos que no sean alimentos.
+    Por eso `normativa_junaeb` sigue sin construirse: la Ley 20.606 completa
+    no está indexada, solo esta regla.
+  - **Conflicto entre fuentes, resuelto por jerarquía**: la ficha oficial de
+    ChileAtiende (actualizada el 8-ene-2026) dice "hasta 2 sellos", y una
+    nota de Meganoticias (mar-2026) dice "más de tres sellos". Se adoptó la
+    oficial; el medio periodístico no se indexó.
+  - **Cobertura parcial, a propósito**: la entrada declara que las fuentes no
+    mencionan las bebidas energéticas ni aclaran si las bebidas entran en la
+    categoría de "alimentos", y recomienda confirmar con un ejecutivo. Verificado
+    con Gemini real (2026-10-21): el agente cita la regla de ChileAtiende, dice
+    que las fuentes no nombran las bebidas energéticas y sugiere consultar a un
+    ejecutivo, sin inventar.
+  - **Matiz de recuperación (medido, índice de 178 fragmentos)**: la pregunta
+    literal "¿Puedo comprar bebidas energéticas con mi BAES?" NO recupera esta
+    entrada (puesto 11); la recuperan las reformulaciones del agente
+    ("bebidas energeticas" en el puesto 2 de 4; las que incluyen "sellos", en el
+    1). Funciona porque el agente reformula antes de buscar (hasta 2
+    búsquedas), no porque el embedding local conecte "energéticas" con
+    "sellos" — una pregunta formulada distinto podría no recuperarla.
+  Mismo patrón que `rag/loaders/comercios_scraper.py` y `agent/validator.py`:
+  documentada como decisión de alcance, no como funcionalidad pendiente por
+  olvido — pero esta decisión se revisó al encontrar un vacío real.
 - **Integración con el buscador real de comercios de Pluxee**
   (`rag/loaders/comercios_scraper.py`): el buscador web no expone API y
   bloquea scraping. Se usa un dataset simulado de 15 comercios en su lugar.
@@ -294,6 +324,16 @@ diseñados para mostrar esto con llamadas reales.
        memoria) → regla 5 en `prompts/agente.py` (máx. 2 búsquedas) y
        degradación a un mensaje honesto de "no encontré información" si
        igual se agota el límite.
+       - **Aclaración de contexto**: cuando se encontró el bucle
+         (2026-10-08), "bebidas energéticas" estaba efectivamente **fuera de
+         cobertura** del corpus — el manual no tiene la regla de sellos "Alto
+         en" (ver la corrección a `normativa_junaeb` más arriba). El arreglo
+         del bucle (regla 5 + degradación) sigue siendo válido para
+         cualquier pregunta realmente fuera de cobertura. Desde la entrada
+         de FAQ sobre sellos (2026-10-21), "bebidas energéticas" pasó a
+         estar **cubierta parcialmente**: el agente responde con la regla
+         general de ChileAtiende y deriva a un ejecutivo por lo específico,
+         en vez de decir que no hay información.
     4. El clasificador (prompt de EP1) mandaba "¿Qué te pregunté la última
        vez?" a ESCALAR por "ambigua", así que la memoria de largo plazo era
        inalcanzable → ampliación mínima de `prompts/clasificador.py`.

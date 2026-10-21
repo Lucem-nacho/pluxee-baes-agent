@@ -3,8 +3,9 @@ resolución + FAQ + tweets normativos) vía `rag/indexing/build_vectorstore.py`,
 carga la tabla sqlite de comercios vía `rag/retrieval/comercios_query.py`, y
 (EP2) crea el archivo sqlite de memoria persistente vía `memory/store.py`.
 
-La colección "normativa_junaeb" no se construye — se determinó redundante
-con el manual, ver docs/arquitectura.md.
+La colección "normativa_junaeb" no se construye — la regla de sellos "Alto en"
+que el manual no cubría se resolvió con una entrada de FAQ; ver
+docs/arquitectura.md.
 
 Correr una vez al preparar el proyecto, y de nuevo si cambian los PDFs/FAQ/
 tweets mock. No requiere GOOGLE_API_KEY: todo el trabajo es local

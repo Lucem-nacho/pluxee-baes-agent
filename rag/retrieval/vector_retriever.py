@@ -5,10 +5,11 @@ Responsabilidad: dada una consulta, buscar en "manual_faq_social" y
 fragmentos más relevantes de cada una, con su metadata (fuente, fecha)
 intacta para que `rag/arbitration.py` pueda operar sobre ella.
 
-"normativa_junaeb" no existe como colección en esta versión — se determinó
-redundante con el contenido ya cubierto por el manual (ver limitación
-documentada en docs/arquitectura.md), no un vacío pendiente. Se omite en vez
-de fallar, para que este módulo no se rompa si esa decisión cambia más adelante.
+"normativa_junaeb" no existe como colección en esta versión: el manual ya
+cubría alcohol/tabaco/fármacos, y la regla de sellos "Alto en" que sí faltaba
+se resolvió con una entrada de FAQ (ver limitación documentada en
+docs/arquitectura.md). Se omite en vez de fallar, para que este módulo no se
+rompa si esa decisión cambia más adelante.
 """
 
 import chromadb

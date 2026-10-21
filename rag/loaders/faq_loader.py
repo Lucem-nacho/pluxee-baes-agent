@@ -2,11 +2,12 @@
 
 A diferencia del manual/resolución (`rag/loaders/pdf_loader.py`, donde
 `fuente`/`fecha` son constantes fijas por documento), cada entrada de
-data/faq/faq_baes.json trae su propia metadata `fuente`/`fecha`: los 8 pares
-actuales citan el manual como origen (son paráfrasis suyas), pero una FAQ es
-semi-estática por diseño y una entrada futura podría citar otra fuente o una
-fecha de actualización distinta. El loader respeta lo que viene en el JSON
-en vez de hardcodear un valor.
+data/faq/faq_baes.json trae su propia metadata `fuente`/`fecha`: 8 de los 9
+pares actuales citan el manual como origen (son paráfrasis suyas) y uno
+(sellos "Alto en", Ley 20.606) cita la ficha oficial de ChileAtiende —
+justamente el caso para el que se diseñó esto: una FAQ es semi-estática y
+sus entradas pueden venir de fuentes o fechas distintas. El loader respeta
+lo que viene en el JSON en vez de hardcodear un valor.
 
 NO pasa por rag/indexing/chunking.py: cada par pregunta-respuesta ya es un
 fragmento atómico, tal como especifica la arquitectura.
