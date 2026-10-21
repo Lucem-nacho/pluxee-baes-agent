@@ -209,7 +209,8 @@ diseñados para mostrar esto con llamadas reales.
     que las fuentes no nombran las bebidas energéticas y sugiere consultar a un
     ejecutivo, sin inventar.
   - **Matiz de recuperación (medido sin Gemini, con el embedding local)**:
-    con solo la primera entrada (índice de 178 fragmentos), la pregunta
+    con solo la primera entrada (índice de 178 fragmentos, 1 más que los 177
+    reales por el defecto de `upsert` descrito más abajo), la pregunta
     literal "¿Puedo comprar bebidas energéticas con mi BAES?" NO la
     recuperaba (puesto 11 de 178, fuera del top-4); la recuperaban las
     reformulaciones del agente ("bebidas energeticas" en el puesto 2 de 4; las
@@ -223,9 +224,18 @@ diseñados para mostrar esto con llamadas reales.
       redacciones: "bebidas energeticas" 1; las reformulaciones reales del
       agente 1 (las tres); "¿Puedo comprar snacks o papas fritas con la
       BAES?" 1; "¿Qué productos puedo comprar con la BAES?" 1; "¿Puedo comprar
-      gaseosas con la BAES?" 4 (justo en el límite del top-4). Control: con
-      "¿Puedo comprar alcohol con la BAES?" queda en el 6, fuera del top-4,
-      así que no desplaza a la entrada de alcohol.
+      gaseosas con la BAES?" 4 (justo en el límite del top-4). Control con
+      "¿Puedo comprar alcohol con la BAES?": se midió en el puesto 6, fuera
+      del top-4 — **pero ese índice tenía 3 fragmentos huérfanos** (el tweet
+      de alcohol del 2026-08-10 triplicado, por el defecto de `upsert`
+      descrito más abajo), que la empujaban hacia atrás. **Re-medido con el
+      índice limpio (177 fragmentos) queda en el puesto 3**, dentro del
+      top-4, detrás de la FAQ de alcohol (#1) y del tweet de alcohol (#2):
+      no desplaza a las fuentes de alcohol, pero sí ocupa un lugar. El resto
+      de las mediciones se repitió con el índice limpio y las conclusiones
+      no cambian (la pregunta literal sigue en el puesto 1; la entrada
+      original sigue en el 12; las variaciones fueron de hasta 3 puestos en
+      consultas de cola, p. ej. gaseosas 66 → 63).
     - **Las dos entradas coexisten**: su similitud coseno es 0.806, bajo
       `UMBRAL_MISMO_TEMA=0.9`, así que el arbitraje no las agrupa y las dos
       llegan al agente como `vigente` (medido con "bebidas energeticas":
@@ -254,11 +264,14 @@ diseñados para mostrar esto con llamadas reales.
   FAQ y su propia fila real en la tabla del manual sobre el MISMO tema
   (~0.57). Se fijó `UMBRAL_MISMO_TEMA=0.9` a propósito para evitar ese falso
   positivo.
-  - **Confirmado con una contradicción real deliberada** (no solo con datos
-    que coinciden por casualidad): se agregó un tweet mock que actualiza a
-    propósito la regla de fármacos ("ya no está prohibido comprar fármacos
+  - **Probado con una contradicción plantada a propósito** (no una
+    contradicción real del mundo, sino un dato de prueba que se escribió en
+    EP1 para ejercitar el arbitraje; esta aclaración se agregó el
+    2026-10-21): se agregó un tweet mock que "actualiza" la regla de
+    fármacos ("ya no está prohibido comprar fármacos
     de venta libre", 2026-09-01) contradiciendo a la FAQ/manual ("es causal
-    de sanción definitiva", 2026-01). `recuperar()` trae ambos fragmentos en
+    de sanción definitiva", 2026-01) — y contradiciendo la regla real, ya que
+    el saldo de la BAES es solo para alimentos. `recuperar()` trae ambos fragmentos en
     el top-6 para la consulta "¿Puedo comprar fármacos con la BAES?", pero
     `resolver_contradicciones` los puso a los 6 en `vigente` — **no detectó
     la contradicción**. Medido directamente: similitud = **0.723**, prácticamente
@@ -293,6 +306,8 @@ diseñados para mostrar esto con llamadas reales.
       muy en cuenta que la prohibición de comprar alcohol y tabaco se
       mantiene y sigue siendo causal de pérdida definitiva del beneficio."
       Sin advertencias de formato (cita fuente y fecha explícitas, 3 frases).
+      Es una respuesta fiel al tweet plantado pero **incorrecta respecto a
+      la regla real** — justamente lo que motivó retirarlo (ver abajo).
     - **Corrida 2 (tweet al final) — NO se pudo ejecutar**: `ClientError`
       429 persistente (`GenerateRequestsPerDayPerProjectPerModel-FreeTier`),
       incluso después del reintento automático de `llm/client.py` (que
@@ -307,10 +322,50 @@ diseñados para mostrar esto con llamadas reales.
       diseño en dos capas (arbitraje heurístico + razonamiento del LLM)
       compensa la falla de la primera capa queda **pendiente de la Corrida
       2**, a ejecutar cuando la cuota diaria se reponga de verdad.
+  - **Retiro del corpus vivo (2026-10-21)**: el tweet plantado se sacó de
+    `data/social/tweets_mock.json` porque contradecía la regla real y hacía
+    que el agente respondiera que los fármacos sí se pueden comprar. Las
+    mediciones de arriba se conservan tal como se tomaron (con el tweet en el
+    corpus). Queda como dato de prueba reproducible en
+    `data/social/tweets_contradiccion_prueba.json`, que ningún código lee
+    (`rag/loaders/social_loader.py` solo lee `tweets_mock.json`): para
+    reproducir el experimento hay que copiar esa entrada de vuelta al mock y
+    correr `python scripts/ingest_all.py`.
+    - **Verificado tras el retiro (sin Gemini, con `recuperar()`)**: para
+      "¿Puedo comprar fármacos con la BAES?" ya no aparece el fragmento del
+      2026-09-01. Con el `k=4` por defecto del agente aparecen la FAQ de
+      alcohol/tabaco/fármacos y dos fragmentos del manual, pero **no** el
+      tweet del 2026-08-10, que solo entra con `k=6`. Además, los fragmentos
+      del manual recuperados son la página 6 (glosario) y la 49 (Beca
+      Patagonia Aysén), **ninguno menciona alcohol, tabaco ni fármacos**: la
+      fila real de la tabla de causales no está en el top-6 de esa pregunta
+      (consecuencia del chunking de tablas, ver más abajo). Hoy la evidencia
+      contra los fármacos viene de la FAQ y, con `k` mayor, del tweet de
+      recordatorio.
+    - **Defecto del índice descubierto al retirarlo**: `construir_indices`
+      usaba `upsert`, que no borra lo que ya no existe en las fuentes, así
+      que correr `ingest_all.py` no habría quitado el tweet de Chroma.
+      Además, los ids son `tipo-N` con N global, así que cada entrada
+      agregada a la FAQ corrió los ids de los tweets y dejó huérfanos los
+      viejos: el índice tenía 180 fragmentos frente a 177 reales, con el
+      tweet del 2026-08-10 triplicado. Corregido: `construir_indices` ahora
+      recrea la colección en cada corrida (`tests/test_build_vectorstore.py`
+      reproduce el defecto y falla con el código anterior).
   - En la práctica, mientras no se resuelva esto, `rag/arbitration.py`
     funciona como un colapsador de casi-duplicados literales, no como un
     detector genuino de contradicciones entre fuentes con redacciones
     distintas.
+- **La regla de recencia no tiene jerarquía de autoridad**
+  (`rag/arbitration.py`, regla 2 de `prompts/agente.py` y de
+  `prompts/generador.py`): cuando dos fuentes se contradicen, el criterio es
+  "gana la más reciente", sin considerar quién la emite. Una fuente no
+  oficial (un post en redes) puede entonces pisar al manual oficial. No es
+  teórico: es lo que ocurrió con el tweet plantado, cuya fecha más reciente
+  hizo que el generador respondiera que los fármacos sí se pueden comprar
+  (Corrida 1, arriba). Mejora futura, no implementada: ponderar por
+  autoridad de la fuente (manual y resolución oficiales por sobre FAQ
+  oficial, y estas por sobre redes sociales) o validar el contenido antes de
+  ingerir fuentes dinámicas.
 - **Chunking de contenido tabular** (`rag/indexing/chunking.py`): la causa
   raíz del hallazgo anterior es que `CHUNK_SIZE=800` empaqueta varias filas
   de la tabla de causales del manual en un mismo chunk, mezclando 2-3

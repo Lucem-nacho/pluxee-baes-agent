@@ -64,8 +64,13 @@ def preparar_documentos_manual_faq_social() -> list[dict]:
 def construir_indices() -> None:
     """Calcula embeddings y persiste la colección 'manual_faq_social' en Chroma.
 
-    Usa upsert (no add) para que correr el script de nuevo tras cambiar un
-    PDF o la FAQ no falle por ids duplicados.
+    RECREA la colección desde cero en cada corrida. Antes se usaba `upsert`
+    sobre la colección existente, pero `upsert` no borra lo que ya no está en
+    las fuentes, y los ids son `tipo-N` con N = posición global: agregar una
+    entrada a la FAQ corre los ids de los tweets y deja los viejos huérfanos
+    (se llegó a tener el mismo tweet triplicado), y retirar un fragmento de
+    una fuente no lo quitaba del índice. Así el índice refleja exactamente lo
+    que hay hoy en las fuentes.
     """
     documentos = preparar_documentos_manual_faq_social()
 
@@ -77,8 +82,12 @@ def construir_indices() -> None:
     ).tolist()
 
     cliente = chromadb.PersistentClient(path=str(Path(settings.CHROMA_PERSIST_DIR)))
-    coleccion = cliente.get_or_create_collection(settings.COLLECTION_MANUAL_FAQ_SOCIAL)
-    coleccion.upsert(
+    try:
+        cliente.delete_collection(settings.COLLECTION_MANUAL_FAQ_SOCIAL)
+    except chromadb.errors.NotFoundError:
+        pass  # primera corrida: todavía no existe
+    coleccion = cliente.create_collection(settings.COLLECTION_MANUAL_FAQ_SOCIAL)
+    coleccion.add(
         ids=[f"{d['tipo_fragmento']}-{i}" for i, d in enumerate(documentos)],
         embeddings=embeddings,
         documents=[d["texto"] for d in documentos],
