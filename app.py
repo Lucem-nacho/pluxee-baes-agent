@@ -69,6 +69,10 @@ with st.sidebar:
         "Tu identificador", value=st.session_state.id_usuario
     )
     st.caption("Anótalo y vuelve a escribirlo en una sesión nueva para probarlo.")
+    st.caption(
+        "Las consultas se registran de forma anónima (se enmascaran RUT, "
+        "correos y teléfonos) para monitorear el servicio."
+    )
 
 if "mensajes" not in st.session_state:
     st.session_state.mensajes = []  # [{"role": "user"|"assistant", "content": str}]

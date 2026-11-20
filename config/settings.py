@@ -30,5 +30,12 @@ COLLECTION_NORMATIVA_JUNAEB = "normativa_junaeb"
 # --- Memoria persistente (EP2): escalamientos + memoria de largo plazo ---
 MEMORIA_DB_PATH = os.getenv("MEMORIA_DB_PATH", "data/processed/memoria.db")
 
+# --- Observabilidad (EP3): registro de ejecuciones del agente ---
+OBSERVABILIDAD_DB_PATH = os.getenv("OBSERVABILIDAD_DB_PATH", "data/processed/observabilidad.db")
+# Sal opcional para anonimizar id_usuario. Si no se define, se genera una al
+# azar la primera vez y se guarda en un archivo junto a la base (ver
+# observabilidad/privacidad.py).
+OBSERVABILIDAD_SAL = os.getenv("OBSERVABILIDAD_SAL")
+
 # --- Fuente estructurada (comercios) ---
 COMERCIOS_CSV_PATH = "data/comercios/comercios.csv"

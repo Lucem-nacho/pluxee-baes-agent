@@ -32,6 +32,9 @@ def clasificar(consulta_usuario: str, historial_contexto: str) -> dict:
         return {
             "categoria": "ESCALAR",
             "justificacion": f"Respuesta del clasificador no interpretable, se deriva por seguridad ({error}).",
+            # Señal para `observabilidad`: distingue esta derivación de una
+            # ESCALAR decidida por el modelo, sin parsear la justificación.
+            "no_interpretable": True,
         }
 
 

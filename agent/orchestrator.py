@@ -25,6 +25,10 @@ Qué cambia respecto a EP1 y qué se mantiene intacto:
 4. Toda interacción resuelta (por cualquiera de los dos caminos) se
    registra en la memoria de largo plazo (`memory.store.registrar_interaccion`,
    EP2 IE3/IE4) antes de devolver el resultado a `app.py`.
+5. (EP3) Cada llamada a `responder` queda registrada en la base de
+   observabilidad (`observabilidad/`), incluidas las que terminan en
+   excepción. Es solo medición: no cambia lo que `responder` devuelve ni lo
+   que lanza.
 
 `agent/generator.py` y la llamada directa a `rag/arbitration.py` de EP1 YA
 NO se usan en el camino INFORMATIVA: su lógica fue absorbida por
@@ -56,6 +60,9 @@ from agent.classifier import clasificar
 from agent.tools import construir_tools
 from config import settings
 from memory.store import registrar_escalamiento, registrar_interaccion
+from observabilidad import store as observabilidad_store
+from observabilidad.callbacks import RegistroPasos
+from observabilidad.medicion import Medicion
 from prompts.agente import SYSTEM_PROMPT_AGENTE
 
 MAX_ITERACIONES_AGENTE = 6  # tope de llamadas a tools por consulta: evita que
@@ -80,7 +87,9 @@ MENSAJE_SIN_RESPUESTA = (
 )
 
 
-def responder(consulta_usuario: str, historial_contexto: str, id_usuario: str) -> dict:
+def responder(
+    consulta_usuario: str, historial_contexto: str, id_usuario: str, origen: str = "app"
+) -> dict:
     """Punto de entrada único que usa `app.py`.
 
     `id_usuario` identifica la memoria de largo plazo del estudiante (ver
@@ -88,11 +97,37 @@ def responder(consulta_usuario: str, historial_contexto: str, id_usuario: str) -
     reemplaza `historial_contexto`, que sigue siendo la memoria de corto
     plazo de la sesión actual en el navegador.
 
+    `origen` ("app" por defecto, o "evaluacion") solo marca la ejecución en
+    la base de observabilidad, para que los scripts de evaluación no se
+    mezclen con el uso real.
+
     Devuelve `{"estado": "INFORMATIVA", "respuesta": ..., "pasos": [...]}`
     o `{"estado": "ESCALAR", ...}` — ambas formas comparten la clave
     `estado` para que `app.py` pueda ramificar sin conocer el detalle de
     cada una, igual que en EP1."""
-    clasificacion = clasificar(consulta_usuario, historial_contexto)
+    if origen not in observabilidad_store.ORIGENES:
+        raise ValueError(f"origen inválido: {origen!r} (debe ser uno de {observabilidad_store.ORIGENES})")
+
+    medicion = Medicion(origen=origen, id_usuario=id_usuario, consulta=consulta_usuario)
+    try:
+        resultado = _responder(consulta_usuario, historial_contexto, id_usuario, medicion)
+        medicion.registrar_resultado(resultado)
+        return resultado
+    except Exception as error:
+        medicion.registrar_excepcion(error)
+        raise
+    finally:
+        medicion.cerrar()
+
+
+def _responder(
+    consulta_usuario: str, historial_contexto: str, id_usuario: str, medicion: Medicion
+) -> dict:
+    with medicion.medir("clasificador"):
+        clasificacion = clasificar(consulta_usuario, historial_contexto)
+    medicion.categoria = clasificacion["categoria"]
+    if clasificacion.get("no_interpretable"):
+        medicion.tipo_error = "clasificador_no_interpretable"
 
     if clasificacion["categoria"] == "ESCALAR":
         resultado = registrar_escalamiento(
@@ -103,10 +138,12 @@ def responder(consulta_usuario: str, historial_contexto: str, id_usuario: str) -
         )
         return resultado
 
-    return _responder_informativa(consulta_usuario, historial_contexto, id_usuario)
+    return _responder_informativa(consulta_usuario, historial_contexto, id_usuario, medicion)
 
 
-def _responder_informativa(consulta_usuario: str, historial_contexto: str, id_usuario: str) -> dict:
+def _responder_informativa(
+    consulta_usuario: str, historial_contexto: str, id_usuario: str, medicion: Medicion
+) -> dict:
     registro_escalamiento: dict = {}
     tools = construir_tools(id_usuario, consulta_usuario, historial_contexto, registro_escalamiento)
 
@@ -136,9 +173,14 @@ def _responder_informativa(consulta_usuario: str, historial_contexto: str, id_us
         return_intermediate_steps=True,
     )
 
-    resultado = executor.invoke(
-        {"consulta_usuario": consulta_usuario, "historial_contexto": historial_contexto}
-    )
+    # El handler va en `config`, no en el constructor del AgentExecutor: los
+    # callbacks del constructor no se heredan a las tools ni al modelo.
+    medicion.registro_pasos = RegistroPasos()
+    with medicion.medir("agente"):
+        resultado = executor.invoke(
+            {"consulta_usuario": consulta_usuario, "historial_contexto": historial_contexto},
+            config={"callbacks": [medicion.registro_pasos]},
+        )
     pasos = _resumir_pasos(resultado["intermediate_steps"])
 
     if registro_escalamiento:
@@ -151,6 +193,7 @@ def _responder_informativa(consulta_usuario: str, historial_contexto: str, id_us
 
     respuesta_final = _texto_de_salida(resultado["output"])
     if not respuesta_final or respuesta_final.startswith(PREFIJO_CORTE_POR_LIMITE):
+        medicion.tipo_error = "sin_respuesta" if not respuesta_final else "limite_iteraciones"
         respuesta_final = MENSAJE_SIN_RESPUESTA
     registrar_interaccion(id_usuario, consulta_usuario, respuesta_final, "INFORMATIVA")
 
