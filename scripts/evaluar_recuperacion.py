@@ -23,7 +23,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from config import settings
 from observabilidad.casos import ErrorEsquema, cargar_casos
-from observabilidad.eval_recuperacion import K_POR_DEFECTO, KS, evaluar, guardar_csv, resumir
+from observabilidad.eval_recuperacion import K_POR_DEFECTO, KS, evaluar, guardar_csv, resumir, separar_evaluables
 
 
 def _porcentaje(valor: float) -> str:
@@ -44,11 +44,14 @@ def main() -> int:
     parser.add_argument("--salida", default=None, help="Ruta del CSV (por defecto data/processed/eval/recuperacion_<fecha>.csv).")
     args = parser.parse_args()
 
+    avisos: list[str] = []
     try:
-        casos = cargar_casos(args.casos_path, incluir_ejemplos=args.incluir_ejemplos)
+        casos = cargar_casos(args.casos_path, incluir_ejemplos=args.incluir_ejemplos, advertencias=avisos)
     except ErrorEsquema as error:
         print(error, file=sys.stderr)
         return 2
+    for aviso in avisos:
+        print(f"Aviso: {aviso}", file=sys.stderr)
     if args.casos:
         pedidos = {c.strip() for c in args.casos.split(",") if c.strip()}
         desconocidos = pedidos - {c["id"] for c in casos}
@@ -57,7 +60,9 @@ def main() -> int:
             return 2
         casos = [c for c in casos if c["id"] in pedidos]
 
-    evaluables = [c for c in casos if c["fuente_esperada"]]
+    evaluables, omitidos = separar_evaluables(casos)
+    if omitidos:
+        print(f"Omití {len(omitidos)} caso(s) sin 'fuente_esperada' (no dependen del índice vectorial): {', '.join(c['id'] for c in omitidos)}")
     if not evaluables:
         print("No hay casos con 'fuente_esperada' para evaluar (¿solo hay ejemplos? usa --incluir-ejemplos).")
         return 0
@@ -72,7 +77,7 @@ def main() -> int:
     guardar_csv(filas, salida)
 
     resumen = resumir(filas)
-    print(f"Recuperación sobre {len(evaluables)} caso(s) con fuente esperada, {len(filas)} consulta(s), k={args.k}")
+    print(f"Recuperación sobre {len(evaluables)} caso(s) con fuente esperada ({len(omitidos)} omitido(s)), {len(filas)} consulta(s), k={args.k}")
     print(_linea("GLOBAL", resumen["global"]))
     for categoria, r in resumen["por_categoria_caso"].items():
         print(_linea(categoria, r))

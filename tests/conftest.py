@@ -18,3 +18,14 @@ def db_observabilidad(tmp_path, monkeypatch) -> Path:
     monkeypatch.setattr(settings, "OBSERVABILIDAD_DB_PATH", str(ruta))
     monkeypatch.setattr(settings, "OBSERVABILIDAD_SAL", None)
     return ruta
+
+
+@pytest.fixture(autouse=True)
+def sin_api_key_de_gemini(monkeypatch):
+    """Ninguna prueba puede llamar a Gemini de verdad: sin clave, un intento
+    accidental falla al instante en vez de gastar cuota. (Lección aprendida: una
+    prueba que ejecutó un script con el casos.json real hizo ejecuciones
+    reales.) `config.settings` copia la clave del .env al entorno al
+    importarse, por eso se quita de los dos lados."""
+    monkeypatch.setattr(settings, "GOOGLE_API_KEY", None)
+    monkeypatch.delenv("GOOGLE_API_KEY", raising=False)

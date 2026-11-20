@@ -1,56 +1,223 @@
 {
   "esquema": {
-    "id": "Identificador único del caso: letras, números, '_' o '-', sin espacios.",
-    "categoria_caso": "Tipo de caso: normativa | comercio | derivar | memoria.",
-    "pregunta": "La pregunta original, tal como la escribiría un estudiante.",
-    "variantes": "Lista de reformulaciones de la misma pregunta (puede ser []). Se evalúan igual que la original.",
-    "categoria_esperada": "Lo que debe decidir el clasificador: INFORMATIVA | ESCALAR.",
-    "herramientas_esperadas": "Herramientas que el agente debe usar, como conjunto sin repetidos (el orden no importa): buscar_normativa, buscar_comercio, consultar_historial, escalar_a_ejecutivo. Con categoria_esperada ESCALAR debe ser [] porque el agente no llega a correr.",
-    "veredicto_esperado": "Respuesta correcta: permitido | prohibido | no_confirmable (las fuentes no alcanzan para confirmar) | derivar.",
-    "fuente_esperada": "Texto que debe aparecer en el fragmento recuperado o en el nombre de su fuente (se compara sin mayúsculas ni tildes). null si el caso no depende del índice vectorial, p. ej. los comercios, que viven en una tabla SQL.",
+    "id": "Identificador único del caso: letras, números, '_' o '-', sin espacios. Los que terminan en '-prep' están reservados para las consultas de preparación.",
+    "categoria_caso": "Tipo de caso: normativa | comercio | derivacion | memoria.",
+    "pregunta": "La pregunta principal, tal como la escribiría un estudiante.",
+    "variantes": "Lista de reformulaciones de la misma pregunta (puede ser []). Se evalúan igual que la principal.",
+    "categoria_esperada": "Lo que debe decidir el clasificador: INFORMATIVA | ESCALAR. En los casos de derivacion cuenta como correcto el estado final ESCALAR por cualquiera de los dos caminos: que el clasificador derive de entrada, o que el agente llame a escalar_a_ejecutivo.",
+    "herramientas_esperadas": "Herramientas que el agente debe usar, como conjunto sin repetidos (el orden no importa): buscar_normativa, buscar_comercio, consultar_historial, escalar_a_ejecutivo. En un caso de derivacion, [] acepta los dos caminos: ninguna herramienta (deriva el clasificador) o solo escalar_a_ejecutivo (deriva el agente).",
+    "veredicto_esperado": "Respuesta correcta: permitido | prohibido | no_confirmable (las fuentes no alcanzan para confirmar) | derivar | no_aplica (el caso no tiene veredicto, p. ej. memoria).",
+    "fuente_esperada": "Texto que debe aparecer en el fragmento recuperado o en el nombre de su fuente (se compara sin importar mayúsculas, espacios ni saltos de línea). Puede estar vacío (\"\") si el caso no depende del índice vectorial, p. ej. los comercios, que viven en una tabla SQL; esos casos se omiten de la evaluación de recuperación.",
+    "preparacion": "(opcional) Lista de consultas que se ejecutan antes del caso con el mismo id_usuario, para dejar historial. Si falta, scripts/evaluar_agente.py usa una por defecto solo para memoria-01.",
     "ejemplo": "(opcional) true marca un caso de muestra: los scripts lo ignoran salvo con --incluir-ejemplos. Los casos reales no lo llevan.",
-    "notas": "(opcional) Texto libre para ti."
+    "notas": "(opcional) Texto libre."
   },
   "casos": [
     {
-      "id": "ej_normativa_alcohol",
+      "id": "normativa-02",
       "categoria_caso": "normativa",
-      "pregunta": "¿Puedo comprar alcohol con la BAES?",
+      "pregunta": "¿Puedo comprar alimentos en el supermercado con la BAES si tienen sellos de advertencia?",
       "variantes": [
-        "¿Se puede comprar cerveza o vino con la BAES?",
-        "¿La BAES sirve para comprar bebidas alcohólicas?"
+        "¿Cuántos sellos \"Alto en\" como máximo puede tener un producto para pagarlo con la BAES?",
+        "¿Sirve la beca de alimentación para comprar productos con hasta 2 sellos en el súper?"
       ],
       "categoria_esperada": "INFORMATIVA",
-      "herramientas_esperadas": ["buscar_normativa"],
-      "veredicto_esperado": "prohibido",
-      "fuente_esperada": "alcohol, tabaco",
-      "ejemplo": true
+      "herramientas_esperadas": [
+        "buscar_normativa"
+      ],
+      "veredicto_esperado": "permitido",
+      "fuente_esperada": "En supermercados puedes comprar alimentos que tengan hasta 2 sellos de advertencia \"Alto en\" (Ley N° 20.606)."
     },
     {
-      "id": "ej_comercio_jumbo_alcohol",
+      "id": "normativa-03",
+      "categoria_caso": "normativa",
+      "pregunta": "¿Puedo comprar cigarros o medicamentos con la BAES?",
+      "variantes": [
+        "¿Se puede pagar tabaco o fármacos usando el saldo de la beca de alimentación?",
+        "¿La BAES sirve para comprar remedios en la farmacia o cajetillas de cigarros?"
+      ],
+      "categoria_esperada": "INFORMATIVA",
+      "herramientas_esperadas": [
+        "buscar_normativa"
+      ],
+      "veredicto_esperado": "prohibido",
+      "fuente_esperada": "Compra de productos prohibidos tales como alcohol, tabaco y/o fármacos."
+    },
+    {
+      "id": "normativa-04a",
+      "categoria_caso": "normativa",
+      "pregunta": "¿Pierdo la BAES si compro productos prohibidos como alcohol, tabaco o fármacos?",
+      "variantes": [
+        "¿Qué sanción tiene usar la beca de alimentación para comprar alcohol, cigarros o remedios?",
+        "¿Te quitan definitivamente la BAES si te pillan comprando productos prohibidos?"
+      ],
+      "categoria_esperada": "INFORMATIVA",
+      "herramientas_esperadas": [
+        "buscar_normativa"
+      ],
+      "veredicto_esperado": "prohibido",
+      "fuente_esperada": "Es una causal de sanción definitiva que hace perder el beneficio de forma permanente, con investigación corroborada."
+    },
+    {
+      "id": "normativa-04b",
+      "categoria_caso": "normativa",
+      "pregunta": "¿Puedo vender mi tarjeta o saldo BAES por redes sociales?",
+      "variantes": [
+        "¿Qué pasa si publico en internet que vendo mi beca de alimentación?",
+        "¿Me quitan la BAES de forma permanente si intento vender o transferir mi tarjeta?"
+      ],
+      "categoria_esperada": "INFORMATIVA",
+      "herramientas_esperadas": [
+        "buscar_normativa"
+      ],
+      "veredicto_esperado": "prohibido",
+      "fuente_esperada": "Estudiantes que ofrezcan la venta del instrumento de canje, a través de la publicación de avisos en redes sociales u otros medios de difusión"
+    },
+    {
+      "id": "normativa-05a",
+      "categoria_caso": "normativa",
+      "pregunta": "¿Sigo teniendo la BAES si me cambio de carrera o de universidad?",
+      "variantes": [
+        "¿Se pierde la beca de alimentación al cambiarme de institución de educación superior?",
+        "¿Hay alguna restricción con mi BAES si me cambio de carrera a mitad de año?"
+      ],
+      "categoria_esperada": "INFORMATIVA",
+      "herramientas_esperadas": [
+        "buscar_normativa"
+      ],
+      "veredicto_esperado": "permitido",
+      "fuente_esperada": "No se aplicarán restricciones a los(as) estudiantes que efectúen cambios de carrera, pudiendo ser realizados durante cualquier mes del año académico siempre que mantenga los requisitos exigidos para la renovación de la beca."
+    },
+    {
+      "id": "normativa-05b",
+      "categoria_caso": "normativa",
+      "pregunta": "¿Puedo mantener la BAES mientras estoy haciendo mi práctica profesional?",
+      "variantes": [
+        "¿Me siguen pagando la beca de alimentación si ya egresé o estoy en práctica?",
+        "¿Los alumnos en práctica profesional tienen derecho a seguir usando la BAES?"
+      ],
+      "categoria_esperada": "INFORMATIVA",
+      "herramientas_esperadas": [
+        "buscar_normativa"
+      ],
+      "veredicto_esperado": "permitido",
+      "fuente_esperada": "Los(as) alumnos(as) que durante el año en ejecución realicen la práctica profesional o se encuentren en condición de egresados, podrán mantener la BAES toda vez que mantengan la condición de alumno(a) regular."
+    },
+    {
+      "id": "normativa-05c",
+      "categoria_caso": "normativa",
+      "pregunta": "¿Puedo seguir usando mi BAES si me voy de intercambio o pasantía al extranjero?",
+      "variantes": [
+        "¿Me pagan la beca de alimentación durante los meses que esté estudiando fuera de Chile?",
+        "¿Sirve la BAES si hago una pasantía en el extranjero?"
+      ],
+      "categoria_esperada": "INFORMATIVA",
+      "herramientas_esperadas": [
+        "buscar_normativa"
+      ],
+      "veredicto_esperado": "prohibido",
+      "fuente_esperada": "Los(as) estudiantes que durante el año en ejecución realicen pasantías en el extranjero no podrán percibir la BAES durante los meses que no residan en Chile y deberán ser suspendidos por su respectiva Institución de Educación Superior."
+    },
+    {
+      "id": "normativa-06",
+      "categoria_caso": "normativa",
+      "pregunta": "¿Puedo comprar bebidas energéticas con la BAES?",
+      "variantes": [
+        "¿Están permitidas las bebidas energéticas en la beca de alimentación?",
+        "¿Se puede pagar una energética en el supermercado con la BAES?"
+      ],
+      "categoria_esperada": "INFORMATIVA",
+      "herramientas_esperadas": [
+        "buscar_normativa"
+      ],
+      "veredicto_esperado": "no_confirmable",
+      "fuente_esperada": "Las fuentes no mencionan las bebidas energéticas en particular ni aclaran si las bebidas entran en la categoría de alimentos; ante la duda sobre un producto específico, conviene confirmar con un ejecutivo."
+    },
+    {
+      "id": "comercio-01",
       "categoria_caso": "comercio",
-      "pregunta": "¿Puedo comprar alcohol en el Jumbo de Providencia con la BAES?",
+      "pregunta": "¿Puedo pagar con la BAES en Jumbo Providencia?",
       "variantes": [
-        "¿En el Jumbo Providencia puedo pagar cerveza con la BAES?"
+        "¿Aceptan la beca de alimentación en Tottus Maipú?",
+        "¿Puedo usar mi BAES para comprar en McDonald's Alameda?"
       ],
       "categoria_esperada": "INFORMATIVA",
-      "herramientas_esperadas": ["buscar_comercio", "buscar_normativa"],
-      "veredicto_esperado": "prohibido",
-      "fuente_esperada": null,
-      "ejemplo": true
+      "herramientas_esperadas": [
+        "buscar_comercio"
+      ],
+      "veredicto_esperado": "permitido",
+      "fuente_esperada": ""
     },
     {
-      "id": "ej_derivar_cobro_duplicado",
-      "categoria_caso": "derivar",
-      "pregunta": "Me cobraron dos veces en el mismo local, quiero que me devuelvan la plata.",
+      "id": "comercio-02",
+      "categoria_caso": "comercio",
+      "pregunta": "¿Puedo pagar con la BAES en Farmacias Cruz Verde?",
       "variantes": [
-        "Me hicieron un cargo doble en un supermercado, ¿me reembolsan?"
+        "¿Aceptan la beca de alimentación para comprar en Farmacias Cruz Verde?",
+        "¿Sirve la BAES en Farmacias Cruz Verde?"
+      ],
+      "categoria_esperada": "INFORMATIVA",
+      "herramientas_esperadas": [
+        "buscar_comercio"
+      ],
+      "veredicto_esperado": "prohibido",
+      "fuente_esperada": ""
+    },
+    {
+      "id": "comercio-03",
+      "categoria_caso": "comercio",
+      "pregunta": "¿Puedo usar la BAES en el minimarket Don Pepe de mi barrio que no aparece en el listado?",
+      "variantes": [
+        "¿Sirve la beca de alimentación en el almacén La Esquina si no figura en la base de datos?",
+        "¿Aceptan BAES en un local de barrio que no sale en el buscador?"
+      ],
+      "categoria_esperada": "INFORMATIVA",
+      "herramientas_esperadas": [
+        "buscar_comercio"
+      ],
+      "veredicto_esperado": "no_confirmable",
+      "fuente_esperada": ""
+    },
+    {
+      "id": "derivacion-01",
+      "categoria_caso": "derivacion",
+      "pregunta": "Perdí mi clave de acceso y no recuerdo mi PIN de compra de la BAES, resetéamela ahora.",
+      "variantes": [
+        "Se me olvidó la contraseña de mi cuenta BAES, cámbiamela por favor.",
+        "Bloqueé mi cuenta por olvidar el PIN de la beca, desbloquéamela ahora mismo."
       ],
       "categoria_esperada": "ESCALAR",
       "herramientas_esperadas": [],
       "veredicto_esperado": "derivar",
-      "fuente_esperada": null,
-      "ejemplo": true
+      "fuente_esperada": ""
+    },
+    {
+      "id": "derivacion-02",
+      "categoria_caso": "derivacion",
+      "pregunta": "Me cobraron de más en una compra y me descontaron dos veces el saldo de mi BAES, devuélveme el dinero.",
+      "variantes": [
+        "Tengo un cobro duplicado en mi beca de alimentación, reintégrame el saldo ahora.",
+        "Me descontaron mal un pago de la BAES en el local, anula ese cobro y devuélveme la plata."
+      ],
+      "categoria_esperada": "ESCALAR",
+      "herramientas_esperadas": [],
+      "veredicto_esperado": "derivar",
+      "fuente_esperada": ""
+    },
+    {
+      "id": "memoria-01",
+      "categoria_caso": "memoria",
+      "pregunta": "¿Qué te pregunté la vez anterior?",
+      "variantes": [
+        "¿Recuerdas cuál fue mi consulta anterior sobre la BAES?",
+        "¿Qué fue lo último que te consulté en mi sesión pasada?"
+      ],
+      "categoria_esperada": "INFORMATIVA",
+      "herramientas_esperadas": [
+        "consultar_historial"
+      ],
+      "veredicto_esperado": "no_aplica",
+      "fuente_esperada": ""
     }
   ]
 }

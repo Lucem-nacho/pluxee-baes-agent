@@ -7,6 +7,15 @@ campo corregir, en vez de producir métricas silenciosamente equivocadas.
 
 Forma del archivo: un objeto con la clave "casos" (lista). Cualquier otra
 clave de primer nivel (p. ej. "esquema", que documenta los campos) se ignora.
+
+Dos niveles de problema:
+- ERRORES (`validar_casos`, `ErrorEsquema`): el archivo no se puede usar
+  (campo faltante, valor fuera de los permitidos, tipo equivocado, id repetido).
+- AVISOS (`advertencias_de_casos`): el archivo se usa igual, pero algo merece
+  una segunda mirada (un campo que no existe en el esquema, o una combinación
+  de campos poco coherente). Las combinaciones válidas dependen de la categoría
+  del caso (p. ej. un caso de derivación admite dos caminos), así que no se
+  bloquea por ellas.
 """
 
 import json
@@ -16,9 +25,9 @@ from pathlib import Path
 
 RUTA_CASOS = Path(__file__).resolve().parents[1] / "eval" / "casos.json"
 
-CATEGORIAS_CASO = ("normativa", "comercio", "derivar", "memoria")
+CATEGORIAS_CASO = ("normativa", "comercio", "derivacion", "memoria")
 CATEGORIAS_ESPERADAS = ("INFORMATIVA", "ESCALAR")
-VEREDICTOS = ("permitido", "prohibido", "no_confirmable", "derivar")
+VEREDICTOS = ("permitido", "prohibido", "no_confirmable", "derivar", "no_aplica")
 # Las 4 herramientas de agent/tools.py.
 HERRAMIENTAS = ("buscar_normativa", "buscar_comercio", "consultar_historial", "escalar_a_ejecutivo")
 
@@ -30,9 +39,14 @@ CAMPOS_OBLIGATORIOS = (
     "categoria_esperada",
     "herramientas_esperadas",
     "veredicto_esperado",
-    "fuente_esperada",
 )
-CAMPOS_OPCIONALES = ("ejemplo", "notas")
+# `fuente_esperada` puede faltar, ser null o ser texto vacío: el caso simplemente
+# no se evalúa en recuperación. `preparacion` son consultas que se ejecutan antes
+# del caso con el mismo id_usuario (ver eval_agente.py).
+CAMPOS_OPCIONALES = ("fuente_esperada", "ejemplo", "notas", "preparacion")
+
+# Los ids que terminan así quedan reservados para las ejecuciones de preparación.
+SUFIJO_PREPARACION = "-prep"
 
 _ID_VALIDO = re.compile(r"[A-Za-z0-9_-]+")
 
@@ -56,26 +70,31 @@ def _opciones(valores: tuple[str, ...]) -> str:
     return ", ".join(valores)
 
 
+def _nombre(caso: dict, posicion: int) -> str:
+    id_caso = caso.get("id")
+    if isinstance(id_caso, str) and id_caso:
+        return f'caso #{posicion} (id "{id_caso}")'
+    return f"caso #{posicion} (sin id)"
+
+
 def _validar_caso(caso: object, posicion: int, ids_vistos: set[str]) -> list[str]:
     if not isinstance(caso, dict):
         return [f"caso #{posicion}: debe ser un objeto JSON, no {type(caso).__name__}"]
 
+    nombre = _nombre(caso, posicion)
     id_caso = caso.get("id")
-    nombre = f'caso #{posicion} (id "{id_caso}")' if isinstance(id_caso, str) and id_caso else f"caso #{posicion} (sin id)"
     errores: list[str] = []
 
-    faltantes = [c for c in CAMPOS_OBLIGATORIOS if c not in caso]
-    for campo in faltantes:
-        errores.append(f"{nombre}: falta el campo '{campo}'")
-    desconocidos = [c for c in caso if c not in CAMPOS_OBLIGATORIOS + CAMPOS_OPCIONALES]
-    for campo in desconocidos:
-        permitidos = _opciones(CAMPOS_OBLIGATORIOS + CAMPOS_OPCIONALES)
-        errores.append(f"{nombre}: el campo '{campo}' no existe en el esquema (¿error de tipeo? campos válidos: {permitidos})")
+    for campo in CAMPOS_OBLIGATORIOS:
+        if campo not in caso:
+            errores.append(f"{nombre}: falta el campo '{campo}'")
 
     # --- id
     if "id" in caso:
         if not isinstance(id_caso, str) or not _ID_VALIDO.fullmatch(id_caso):
             errores.append(f"{nombre}: 'id' debe ser texto sin espacios, solo letras, números, '_' o '-' (llegó {id_caso!r})")
+        elif id_caso.endswith(SUFIJO_PREPARACION):
+            errores.append(f"{nombre}: los ids que terminan en '{SUFIJO_PREPARACION}' están reservados para las consultas de preparación")
         elif id_caso in ids_vistos:
             errores.append(f"{nombre}: 'id' repetido; cada caso necesita un id único")
         else:
@@ -109,50 +128,41 @@ def _validar_caso(caso: object, posicion: int, ids_vistos: set[str]) -> list[str
                     vistas.add(_normalizar(variante))
 
     # --- herramientas
-    herramientas = caso.get("herramientas_esperadas")
-    herramientas_validas = False
     if "herramientas_esperadas" in caso:
+        herramientas = caso["herramientas_esperadas"]
         if not isinstance(herramientas, list):
             errores.append(f"{nombre}: 'herramientas_esperadas' debe ser una lista (puede ser vacía [])")
         else:
-            malas = [h for h in herramientas if h not in HERRAMIENTAS]
-            for h in malas:
-                errores.append(f"{nombre}: herramienta {h!r} desconocida en 'herramientas_esperadas'; debe ser una de: {_opciones(HERRAMIENTAS)}")
+            for h in herramientas:
+                if h not in HERRAMIENTAS:
+                    errores.append(f"{nombre}: herramienta {h!r} desconocida en 'herramientas_esperadas'; debe ser una de: {_opciones(HERRAMIENTAS)}")
             if len(set(map(str, herramientas))) != len(herramientas):
                 errores.append(f"{nombre}: 'herramientas_esperadas' tiene herramientas repetidas; se compara como conjunto, lístalas una vez")
-            herramientas_validas = not malas
-
-    # --- fuente_esperada: texto o null
-    if "fuente_esperada" in caso:
-        fuente = caso["fuente_esperada"]
-        if fuente is not None and (not isinstance(fuente, str) or not fuente.strip()):
-            errores.append(f"{nombre}: 'fuente_esperada' debe ser un texto no vacío o null (null = el caso no se evalúa en recuperación)")
 
     # --- opcionales
+    fuente = caso.get("fuente_esperada")
+    if fuente is not None and not isinstance(fuente, str):
+        errores.append(f"{nombre}: 'fuente_esperada' debe ser un texto, o vacío/null si el caso no se evalúa en recuperación")
+    if "preparacion" in caso:
+        preparacion = caso["preparacion"]
+        if not isinstance(preparacion, list) or not all(isinstance(p, str) and p.strip() for p in preparacion):
+            errores.append(f"{nombre}: 'preparacion' debe ser una lista de textos no vacíos")
     if "ejemplo" in caso and not isinstance(caso["ejemplo"], bool):
         errores.append(f"{nombre}: 'ejemplo' debe ser true o false")
     if "notas" in caso and not isinstance(caso["notas"], str):
         errores.append(f"{nombre}: 'notas' debe ser un texto")
 
-    # --- coherencia entre campos
-    categoria = caso.get("categoria_esperada")
-    veredicto = caso.get("veredicto_esperado")
-    if categoria == "ESCALAR" and herramientas_validas:
-        # Si el clasificador deriva, el agente nunca corre: no hay herramientas.
-        if herramientas:
-            errores.append(f"{nombre}: con 'categoria_esperada' = ESCALAR el agente no llega a correr, así que 'herramientas_esperadas' debe ser []")
-    if categoria == "ESCALAR" and veredicto in VEREDICTOS and veredicto != "derivar":
-        errores.append(f"{nombre}: con 'categoria_esperada' = ESCALAR el 'veredicto_esperado' debe ser 'derivar' (llegó {veredicto!r})")
-    if veredicto == "derivar" and categoria == "INFORMATIVA" and herramientas_validas and "escalar_a_ejecutivo" not in herramientas:
-        errores.append(f"{nombre}: un 'veredicto_esperado' = derivar con 'categoria_esperada' = INFORMATIVA solo ocurre si el agente llama a 'escalar_a_ejecutivo'; agrégala a 'herramientas_esperadas'")
-    if herramientas_validas and "escalar_a_ejecutivo" in herramientas and veredicto in VEREDICTOS and veredicto != "derivar":
-        errores.append(f"{nombre}: si se espera 'escalar_a_ejecutivo', el 'veredicto_esperado' debe ser 'derivar' (llegó {veredicto!r})")
-
     return errores
 
 
+def _lista_de_casos(datos: object) -> list[dict]:
+    if isinstance(datos, dict) and isinstance(datos.get("casos"), list):
+        return [c for c in datos["casos"] if isinstance(c, dict)]
+    return []
+
+
 def validar_casos(datos: object) -> list[str]:
-    """Devuelve la lista de problemas del contenido ya parseado (vacía si es válido)."""
+    """Devuelve la lista de ERRORES del contenido ya parseado (vacía si es válido)."""
     if not isinstance(datos, dict) or "casos" not in datos:
         return ["el archivo debe ser un objeto JSON con la clave 'casos' (una lista de casos)"]
     casos = datos["casos"]
@@ -168,10 +178,55 @@ def validar_casos(datos: object) -> list[str]:
     return errores
 
 
-def cargar_casos(ruta: str | Path | None = None, incluir_ejemplos: bool = False) -> list[dict]:
+def advertencias_de_casos(datos: object) -> list[str]:
+    """AVISOS sobre un contenido ya parseado: campos que no existen en el
+    esquema y combinaciones de campos poco coherentes. No impiden usar el archivo."""
+    avisos: list[str] = []
+    conocidos = CAMPOS_OBLIGATORIOS + CAMPOS_OPCIONALES
+    for posicion, caso in enumerate(_lista_de_casos(datos), start=1):
+        nombre = _nombre(caso, posicion)
+        for campo in caso:
+            if campo not in conocidos:
+                avisos.append(
+                    f"{nombre}: el campo '{campo}' no existe en el esquema y se ignora "
+                    f"(¿error de tipeo? campos válidos: {_opciones(conocidos)})"
+                )
+
+        categoria = caso.get("categoria_esperada")
+        veredicto = caso.get("veredicto_esperado")
+        herramientas = caso.get("herramientas_esperadas")
+        if not isinstance(herramientas, list) or any(h not in HERRAMIENTAS for h in herramientas):
+            continue  # ya es un error: no tiene sentido comparar
+        es_derivacion = caso.get("categoria_caso") == "derivacion"
+
+        if categoria == "ESCALAR" and herramientas:
+            avisos.append(f"{nombre}: con 'categoria_esperada' = ESCALAR el agente no llega a correr, así que 'herramientas_esperadas' debería ser []")
+        if categoria == "ESCALAR" and veredicto in VEREDICTOS and veredicto not in ("derivar", "no_aplica"):
+            avisos.append(f"{nombre}: con 'categoria_esperada' = ESCALAR el 'veredicto_esperado' debería ser 'derivar' o 'no_aplica' (llegó {veredicto!r})")
+        if (
+            veredicto == "derivar"
+            and categoria == "INFORMATIVA"
+            and "escalar_a_ejecutivo" not in herramientas
+            and not es_derivacion
+        ):
+            avisos.append(f"{nombre}: 'veredicto_esperado' = derivar con 'categoria_esperada' = INFORMATIVA solo ocurre si el agente llama a 'escalar_a_ejecutivo'; considera agregarla a 'herramientas_esperadas'")
+        if "escalar_a_ejecutivo" in herramientas and veredicto in VEREDICTOS and veredicto not in ("derivar", "no_aplica"):
+            avisos.append(f"{nombre}: si se espera 'escalar_a_ejecutivo', el 'veredicto_esperado' debería ser 'derivar' o 'no_aplica' (llegó {veredicto!r})")
+    return avisos
+
+
+def cargar_casos(
+    ruta: str | Path | None = None,
+    incluir_ejemplos: bool = False,
+    advertencias: list[str] | None = None,
+) -> list[dict]:
     """Lee y valida el archivo de casos. Por defecto se descartan los marcados
     con `"ejemplo": true` (los scripts de evaluación los ignoran salvo con
-    `--incluir-ejemplos`). Lanza `ErrorEsquema` si el archivo es inválido."""
+    `--incluir-ejemplos`). Lanza `ErrorEsquema` si el archivo es inválido. Si se
+    pasa una lista en `advertencias`, se le agregan los avisos (ver arriba).
+
+    `fuente_esperada` queda siempre presente: None cuando falta, es null o es
+    texto en blanco."""
     ruta = Path(ruta or RUTA_CASOS)
     origen = str(ruta)
     try:
@@ -188,8 +243,13 @@ def cargar_casos(ruta: str | Path | None = None, incluir_ejemplos: bool = False)
     errores = validar_casos(datos)
     if errores:
         raise ErrorEsquema(errores, origen)
+    if advertencias is not None:
+        advertencias.extend(advertencias_de_casos(datos))
 
     casos = datos["casos"]
+    for caso in casos:
+        fuente = caso.get("fuente_esperada")
+        caso["fuente_esperada"] = fuente if isinstance(fuente, str) and fuente.strip() else None
     return casos if incluir_ejemplos else [c for c in casos if not c.get("ejemplo")]
 
 

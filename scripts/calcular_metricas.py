@@ -7,6 +7,11 @@ consistencia entre repeticiones, tasa de errores por tipo, p50/p95 de latencia
 por etapa y por herramienta, y llamadas y tokens por consulta. Las definiciones
 exactas están en `observabilidad/metricas.py`.
 
+Todo se reporta también POR MODELO (el modelo registrado en cada ejecución):
+si la cuota te obliga a usar más de uno, el bloque global los mezcla y el
+script lo advierte; compara usando `por_modelo`. Las consultas de preparación
+(`<caso>-prep`) y las ejecuciones sin caso no cuentan.
+
 La precisión de veredicto sale de las etiquetas que llena el estudiante en
 data/processed/eval/etiquetas.csv (columnas id_ejecucion, correcto = 1 | 0 |
 parcial, comentario). Si el archivo no existe, se genera una plantilla con una
@@ -46,11 +51,14 @@ def main() -> int:
     parser.add_argument("--salida", default=str(carpeta_eval / "metricas.json"), help="Ruta del JSON de salida.")
     args = parser.parse_args()
 
+    avisos: list[str] = []
     try:
-        casos = cargar_casos(args.casos_path, incluir_ejemplos=args.incluir_ejemplos)
+        casos = cargar_casos(args.casos_path, incluir_ejemplos=args.incluir_ejemplos, advertencias=avisos)
     except ErrorEsquema as error:
         print(error, file=sys.stderr)
         return 2
+    for aviso in avisos:
+        print(f"Aviso: {aviso}", file=sys.stderr)
     if not casos:
         print("Aviso: no hay casos activos (los marcados como ejemplo se ignoran; usa --incluir-ejemplos). Las métricas saldrán vacías.\n")
 

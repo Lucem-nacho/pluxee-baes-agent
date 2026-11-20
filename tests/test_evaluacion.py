@@ -14,19 +14,23 @@ import sqlite3
 import subprocess
 import sys
 import threading
+from collections import Counter
 from pathlib import Path
 
 import pytest
 from modelo_falso import ESCALAR, error_429, error_503, llamada_tool, responder_con, respuesta_final
 
 from config import settings
-from memory.store import inicializar_db
+from memory.store import consultar_historial_usuario, inicializar_db
 from observabilidad import store
-from observabilidad.casos import ErrorEsquema, cargar_casos, validar_casos
+from observabilidad.casos import ErrorEsquema, advertencias_de_casos, cargar_casos, validar_casos
 from observabilidad.eval_agente import (
     Combinacion,
     combinaciones,
     ejecutar,
+    id_usuario_del_caso,
+    planificar,
+    preparacion_de,
     segundos_de_espera,
     separar_pendientes,
 )
@@ -38,6 +42,7 @@ from observabilidad.eval_recuperacion import (
     normalizar,
     rango_del_primer_acierto,
     resumir,
+    separar_evaluables,
 )
 from observabilidad.metricas import (
     ErrorEtiquetas,
@@ -46,6 +51,7 @@ from observabilidad.metricas import (
     generar_plantilla_etiquetas,
     leer_etiquetas,
     percentil,
+    resumen_consola,
     veredicto_observado,
 )
 
@@ -161,14 +167,14 @@ def test_responder_guarda_caso_variante_y_repeticion(db_observabilidad):
 
 
 def registrar(db, caso_id, variante, repeticion, *, origen="evaluacion", estado="INFORMATIVA", categoria="INFORMATIVA",
-              tipo_error="ninguno", total=1000, clasificador=100, agente=900, llamadas=3, t_in=100, t_out=50,
+              tipo_error="ninguno", modelo="m", total=1000, clasificador=100, agente=900, llamadas=3, t_in=100, t_out=50,
               respuesta="No puedes comprar alcohol.", pasos=()):
     return store.registrar_ejecucion(
         {
             "origen": origen, "id_usuario_anonimo": "abc123abc123", "consulta": variante, "categoria": categoria,
             "estado": estado, "latencia_total_ms": total, "latencia_clasificador_ms": clasificador,
             "latencia_agente_ms": agente, "llamadas_llm": llamadas, "tokens_entrada": t_in, "tokens_salida": t_out,
-            "iteraciones_agente": None, "tipo_error": tipo_error, "modelo": "m", "respuesta": respuesta,
+            "iteraciones_agente": None, "tipo_error": tipo_error, "modelo": modelo, "respuesta": respuesta,
             "caso_id": caso_id, "variante": variante, "repeticion": repeticion,
         },
         [
@@ -208,17 +214,63 @@ def errores_de(*casos):
     return validar_casos({"casos": list(casos)})
 
 
+def avisos_de(*casos):
+    return advertencias_de_casos({"casos": list(casos)})
+
+
 def test_un_caso_valido_no_tiene_errores():
     assert errores_de(caso()) == []
     assert errores_de(caso(fuente_esperada=None, variantes=[], ejemplo=True, notas="x")) == []
 
 
-def test_el_casos_json_del_repositorio_es_valido_y_trae_solo_3_ejemplos():
-    todos = cargar_casos(incluir_ejemplos=True)
-    assert len(todos) == 3
-    assert all(c["ejemplo"] is True for c in todos)
-    assert {c["categoria_caso"] for c in todos} == {"normativa", "comercio", "derivar"}
-    assert cargar_casos() == []  # por defecto los ejemplos se ignoran
+IDS_DE_LOS_14_CASOS = [
+    "normativa-02", "normativa-03", "normativa-04a", "normativa-04b", "normativa-05a", "normativa-05b",
+    "normativa-05c", "normativa-06", "comercio-01", "comercio-02", "comercio-03", "derivacion-01",
+    "derivacion-02", "memoria-01",
+]
+
+
+def test_el_casos_json_del_repositorio_trae_los_14_casos_validos_y_sin_avisos():
+    avisos = []
+    casos = cargar_casos(advertencias=avisos)
+
+    assert [c["id"] for c in casos] == IDS_DE_LOS_14_CASOS
+    assert avisos == []
+    assert not any(c.get("ejemplo") for c in casos)
+    assert cargar_casos(incluir_ejemplos=True) == casos  # ya no quedan ejemplos que filtrar
+    assert Counter(c["categoria_caso"] for c in casos) == {"normativa": 8, "comercio": 3, "derivacion": 2, "memoria": 1}
+    assert all(len(c["variantes"]) == 2 for c in casos)
+    assert sorted(c["id"] for c in casos if c["fuente_esperada"] is None) == [
+        "comercio-01", "comercio-02", "comercio-03", "derivacion-01", "derivacion-02", "memoria-01",
+    ]
+    assert {c["veredicto_esperado"] for c in casos} == {"permitido", "prohibido", "no_confirmable", "derivar", "no_aplica"}
+
+
+def test_los_textos_del_casos_json_no_se_alteraron_al_convertirlos():
+    por_id = {c["id"]: c for c in cargar_casos()}
+    assert por_id["normativa-02"]["pregunta"] == "¿Puedo comprar alimentos en el supermercado con la BAES si tienen sellos de advertencia?"
+    assert por_id["normativa-02"]["variantes"][0] == '¿Cuántos sellos "Alto en" como máximo puede tener un producto para pagarlo con la BAES?'
+    assert por_id["normativa-02"]["fuente_esperada"] == 'En supermercados puedes comprar alimentos que tengan hasta 2 sellos de advertencia "Alto en" (Ley N° 20.606).'
+    assert por_id["normativa-04b"]["fuente_esperada"].startswith("Estudiantes que ofrezcan la venta del instrumento de canje")
+    assert por_id["normativa-06"]["variantes"][1] == "¿Se puede pagar una energética en el supermercado con la BAES?"
+    assert por_id["comercio-03"]["pregunta"] == "¿Puedo usar la BAES en el minimarket Don Pepe de mi barrio que no aparece en el listado?"
+    assert por_id["derivacion-01"]["pregunta"] == "Perdí mi clave de acceso y no recuerdo mi PIN de compra de la BAES, resetéamela ahora."
+    assert por_id["memoria-01"]["herramientas_esperadas"] == ["consultar_historial"]
+    assert por_id["derivacion-02"]["herramientas_esperadas"] == [] and por_id["derivacion-02"]["categoria_esperada"] == "ESCALAR"
+
+
+def test_el_esquema_acepta_derivacion_no_aplica_y_fuente_vacia():
+    derivacion = caso(categoria_caso="derivacion", categoria_esperada="ESCALAR", herramientas_esperadas=[], veredicto_esperado="derivar", fuente_esperada="")
+    memoria = caso(categoria_caso="memoria", herramientas_esperadas=["consultar_historial"], veredicto_esperado="no_aplica", fuente_esperada="")
+    assert errores_de(derivacion) == []
+    assert errores_de(memoria) == []
+    for fuente in (None, "", "   ", ...):  # null, vacía, en blanco y ausente
+        assert errores_de(caso(fuente_esperada=fuente)) == []
+
+
+def test_derivar_ya_no_es_una_categoria_de_caso_valida_pero_si_un_veredicto():
+    assert any("derivacion" in m for m in errores_de(caso(categoria_caso="derivar")))
+    assert errores_de(caso(veredicto_esperado="derivar")) == []
 
 
 @pytest.mark.parametrize(
@@ -226,10 +278,12 @@ def test_el_casos_json_del_repositorio_es_valido_y_trae_solo_3_ejemplos():
     [
         ({"id": ...}, "falta el campo 'id'"),
         ({"pregunta": ...}, "falta el campo 'pregunta'"),
+        ({"veredicto_esperado": ...}, "falta el campo 'veredicto_esperado'"),
         ({"id": "con espacio"}, "'id' debe ser texto sin espacios"),
-        ({"categoria_caso": "normativo"}, "'categoria_caso' = 'normativo' no es válido; debe ser uno de: normativa, comercio, derivar, memoria"),
-        ({"categoria_esperada": "informativa"}, "'categoria_esperada' = 'informativa' no es válido"),
-        ({"veredicto_esperado": "prohibida"}, "'veredicto_esperado' = 'prohibida' no es válido; debe ser uno de: permitido, prohibido, no_confirmable, derivar"),
+        ({"id": "algo-prep"}, "reservados para las consultas de preparación"),
+        ({"categoria_caso": "normativo"}, "'categoria_caso' = 'normativo' no es válido; debe ser uno de: normativa, comercio, derivacion, memoria"),
+        ({"categoria_esperada": "informativa"}, "'categoria_esperada' = 'informativa' no es válido; debe ser uno de: INFORMATIVA, ESCALAR"),
+        ({"veredicto_esperado": "prohibida"}, "'veredicto_esperado' = 'prohibida' no es válido; debe ser uno de: permitido, prohibido, no_confirmable, derivar, no_aplica"),
         ({"pregunta": "   "}, "'pregunta' debe ser un texto no vacío"),
         ({"variantes": "otra"}, "'variantes' debe ser una lista"),
         ({"variantes": [""]}, "la variante #1 debe ser un texto no vacío"),
@@ -237,14 +291,10 @@ def test_el_casos_json_del_repositorio_es_valido_y_trae_solo_3_ejemplos():
         ({"herramientas_esperadas": ["buscar_cosas"]}, "herramienta 'buscar_cosas' desconocida"),
         ({"herramientas_esperadas": ["buscar_normativa", "buscar_normativa"]}, "herramientas repetidas"),
         ({"herramientas_esperadas": "buscar_normativa"}, "'herramientas_esperadas' debe ser una lista"),
-        ({"fuente_esperada": ""}, "'fuente_esperada' debe ser un texto no vacío o null"),
+        ({"fuente_esperada": 5}, "'fuente_esperada' debe ser un texto, o vacío/null"),
+        ({"preparacion": "hola"}, "'preparacion' debe ser una lista de textos no vacíos"),
+        ({"preparacion": [""]}, "'preparacion' debe ser una lista de textos no vacíos"),
         ({"ejemplo": "si"}, "'ejemplo' debe ser true o false"),
-        ({"veredicto_esperdo": "prohibido"}, "el campo 'veredicto_esperdo' no existe en el esquema"),
-        # coherencia entre campos
-        ({"categoria_esperada": "ESCALAR", "veredicto_esperado": "derivar"}, "el agente no llega a correr"),
-        ({"categoria_esperada": "ESCALAR", "herramientas_esperadas": [], "veredicto_esperado": "prohibido"}, "debe ser 'derivar'"),
-        ({"veredicto_esperado": "derivar"}, "solo ocurre si el agente llama a 'escalar_a_ejecutivo'"),
-        ({"herramientas_esperadas": ["escalar_a_ejecutivo"]}, "si se espera 'escalar_a_ejecutivo'"),
     ],
 )
 def test_los_errores_del_esquema_dicen_que_caso_y_que_campo(cambios, esperado):
@@ -260,6 +310,33 @@ def test_un_id_repetido_se_senala_en_el_segundo_caso():
 
 def test_se_informan_todos_los_problemas_y_no_solo_el_primero():
     assert len(errores_de(caso(categoria_caso="x", veredicto_esperado="y", pregunta=""))) == 3
+
+
+@pytest.mark.parametrize(
+    "cambios, esperado",
+    [
+        ({"veredicto_esperdo": "prohibido"}, "el campo 'veredicto_esperdo' no existe en el esquema y se ignora"),
+        ({"categoria_esperada": "ESCALAR", "veredicto_esperado": "derivar"}, "el agente no llega a correr"),
+        ({"categoria_esperada": "ESCALAR", "herramientas_esperadas": [], "veredicto_esperado": "prohibido"}, "debería ser 'derivar' o 'no_aplica'"),
+        ({"veredicto_esperado": "derivar"}, "solo ocurre si el agente llama a 'escalar_a_ejecutivo'"),
+        ({"herramientas_esperadas": ["escalar_a_ejecutivo"]}, "si se espera 'escalar_a_ejecutivo'"),
+    ],
+)
+def test_los_campos_desconocidos_y_las_incoherencias_son_avisos_y_no_errores(cambios, esperado):
+    c = caso(**cambios)
+    assert errores_de(c) == []  # el archivo se puede usar igual
+    assert any(esperado in a for a in avisos_de(c)), avisos_de(c)
+    assert all(a.startswith("caso #1") for a in avisos_de(c))
+
+
+def test_un_caso_de_derivacion_acepta_los_dos_caminos_sin_avisos():
+    por_clasificador = caso(categoria_caso="derivacion", categoria_esperada="ESCALAR", herramientas_esperadas=[], veredicto_esperado="derivar")
+    por_agente = caso(
+        id="c2", pregunta="otra", variantes=[], categoria_caso="derivacion", categoria_esperada="INFORMATIVA",
+        herramientas_esperadas=[], veredicto_esperado="derivar",
+    )
+    memoria = caso(id="c3", pregunta="m", variantes=[], categoria_caso="memoria", herramientas_esperadas=["consultar_historial"], veredicto_esperado="no_aplica")
+    assert avisos_de(por_clasificador, por_agente, memoria) == []
 
 
 @pytest.mark.parametrize(
@@ -290,9 +367,30 @@ def test_cargar_casos_con_archivo_roto_o_inexistente_lanza_un_error_claro(tmp_pa
     assert len(capturada.value.errores) == 1 and "veredicto_esperado" in str(capturada.value)
 
 
-def test_los_ejemplos_se_filtran_salvo_que_se_pida():
-    datos = {"casos": [caso(ejemplo=True), caso(id="c2", pregunta="otra")]}
-    assert validar_casos(datos) == []
+def test_cargar_casos_normaliza_la_fuente_vacia_entrega_los_avisos_y_filtra_ejemplos(tmp_path):
+    archivo = tmp_path / "casos.json"
+    archivo.write_text(
+        json.dumps(
+            {
+                "casos": [
+                    caso(id="a", fuente_esperada="texto", veredicto_esperdo="x"),
+                    caso(id="b", pregunta="pb", fuente_esperada="  "),
+                    caso(id="c", pregunta="pc", fuente_esperada=None),
+                    caso(id="d", pregunta="pd", fuente_esperada=...),
+                    caso(id="e", pregunta="pe", ejemplo=True),
+                ]
+            }
+        ),
+        encoding="utf-8",
+    )
+    avisos = []
+    casos = cargar_casos(archivo, advertencias=avisos)
+
+    assert [c["id"] for c in casos] == ["a", "b", "c", "d"]  # el ejemplo se filtra
+    assert [c["fuente_esperada"] for c in casos] == ["texto", None, None, None]
+    assert any("'veredicto_esperdo'" in a for a in avisos)
+    assert [c["id"] for c in cargar_casos(archivo, incluir_ejemplos=True)] == ["a", "b", "c", "d", "e"]
+    assert len(cargar_casos(archivo)) == 4  # sin lista de avisos también funciona
 
 
 # ============================================== D1. hit@k, MRR y recuperación
@@ -316,11 +414,20 @@ def test_el_rango_usa_la_distancia_y_no_el_orden_de_llegada():
     assert rango_del_primer_acierto(fragmentos, "alcohol, tabaco") == 2
 
 
-def test_la_fuente_esperada_se_busca_sin_mayusculas_tildes_ni_saltos_de_linea():
-    assert normalizar("Sanción  DEFINITIVA\nde pérdida") == "sancion definitiva de perdida"
-    assert rango_del_primer_acierto([frag("la\nsanción definitiva", 0.1)], "SANCIÓN definitiva") == 1
+def test_la_fuente_esperada_se_busca_normalizando_espacios_saltos_de_linea_y_mayusculas():
+    assert normalizar("Sanción  DEFINITIVA\nde pérdida\t del  beneficio") == "sanción definitiva de pérdida del beneficio"
+    assert normalizar("Ley N° ２０.606") == "ley n° 20.606"  # NFKC: dígitos de ancho completo (casefold no los toca)
+    assert rango_del_primer_acierto([frag("Ley 20.606", 0.1)], "ley ２０.606") == 1
+    # las tildes se conservan: "sancion" y "sanción" no son lo mismo
+    assert rango_del_primer_acierto([frag("la\nsanción definitiva", 0.1)], "SANCIÓN   definitiva") == 1
+    assert rango_del_primer_acierto([frag("la sanción definitiva", 0.1)], "sancion definitiva") is None
+    # una frase del manual partida en varias líneas dentro del fragmento
+    manual = 'En supermercados puedes comprar alimentos que tengan hasta 2 sellos de\nadvertencia "Alto en"  (Ley N° 20.606).'
+    esperada = 'En supermercados puedes comprar alimentos que tengan hasta 2 sellos de advertencia "Alto en" (Ley N° 20.606).'
+    assert rango_del_primer_acierto([frag(manual, 0.1)], esperada) == 1
     # también cuenta si aparece en el nombre de la fuente
     assert rango_del_primer_acierto([frag("nada", 0.1, fuente="Resolución Exenta DN-00556/2026")], "dn-00556") == 1
+    assert rango_del_primer_acierto([frag("nada", 0.1, fuente="Manual\nBAES  2026")], "manual baes 2026") == 1
     assert rango_del_primer_acierto([frag("nada", 0.1)], "alcohol") is None
 
 
@@ -522,9 +629,13 @@ def test_segundos_de_espera_lee_el_cuerpo_del_sdk_el_texto_y_la_cadena_de_causas
 CASOS_METRICAS = [
     {"id": "A", "categoria_caso": "normativa", "pregunta": "pa", "variantes": ["pa2"], "categoria_esperada": "INFORMATIVA",
      "herramientas_esperadas": ["buscar_normativa"], "veredicto_esperado": "prohibido", "fuente_esperada": "alcohol"},
-    {"id": "B", "categoria_caso": "derivar", "pregunta": "pb", "variantes": [], "categoria_esperada": "ESCALAR",
+    {"id": "B", "categoria_caso": "derivacion", "pregunta": "pb", "variantes": [], "categoria_esperada": "ESCALAR",
      "herramientas_esperadas": [], "veredicto_esperado": "derivar", "fuente_esperada": None},
 ]
+CASO_MEMORIA = {
+    "id": "M", "categoria_caso": "memoria", "pregunta": "pm", "variantes": [], "categoria_esperada": "INFORMATIVA",
+    "herramientas_esperadas": ["consultar_historial"], "veredicto_esperado": "no_aplica", "fuente_esperada": None,
+}
 
 
 def sembrar_metricas(db):
@@ -543,6 +654,7 @@ def sembrar_metricas(db):
     ids["B_2"] = registrar(db, "B", "pb", 2, total=600, clasificador=100, agente=500, llamadas=2, t_in=40, t_out=20, respuesta="Todo bien")
     # ruido que NO debe contar:
     registrar(db, None, "humo", None)                       # sin caso (p. ej. check_agent_executor)
+    registrar(db, "A-prep", "consulta de preparación", 1)   # preparación del caso A: se informa aparte
     registrar(db, "ZZ", "pz", 1)                            # caso que no está en casos.json
     registrar(db, "A", "texto viejo", 1)                    # variante que ya no existe
     registrar(db, "A", "pa", 1, origen="app")               # uso real
@@ -556,21 +668,62 @@ def metricas(db, etiquetas=None, casos=CASOS_METRICAS):
 def test_conteo_de_ejecuciones_y_exclusiones(db_observabilidad):
     sembrar_metricas(db_observabilidad)
     e = metricas(db_observabilidad)["ejecuciones"]
-    assert e == {"evaluacion_total": 9, "sin_caso_excluidas": 1, "fuera_del_conjunto_excluidas": 2,
-                 "consideradas": 6, "completas": 5, "con_error": 1, "unicas": 5}
+    assert e == {"evaluacion_total": 10, "sin_caso_excluidas": 1, "preparacion_excluidas": 1,
+                 "fuera_del_conjunto_excluidas": 2, "consideradas": 6, "completas": 5, "con_error": 1, "unicas": 5}
 
 
 def test_precision_de_clasificacion_y_de_herramientas(db_observabilidad):
     sembrar_metricas(db_observabilidad)
     m = metricas(db_observabilidad)
-    # clasificación: solo B_2 falla (esperaba ESCALAR) -> 4 de 5
+    # clasificación: solo B_2 falla (es un caso de derivación y no terminó en ESCALAR) -> 4 de 5
     assert m["precision_clasificacion"] == {"n": 5, "correctas": 4, "precision": 0.8}
-    # herramientas (conjunto): solo A_pa_2 falla (usó una de más) -> 4 de 5
-    assert m["precision_herramientas"] == {"n": 5, "correctas": 4, "precision": 0.8}
+    # herramientas: A_pa_2 usó una de más y B_2 no derivó (un caso de derivación exige estado ESCALAR) -> 3 de 5
+    assert m["precision_herramientas"] == {"n": 5, "correctas": 3, "precision": 0.6}
     assert m["por_caso"]["A"]["precision_clasificacion"] == 1.0
     assert m["por_caso"]["B"]["precision_clasificacion"] == 0.5
     assert m["por_caso"]["A"]["precision_herramientas"] == pytest.approx(2 / 3)
-    assert m["por_caso"]["B"]["precision_herramientas"] == 1.0
+    assert m["por_caso"]["B"]["precision_herramientas"] == 0.5
+
+
+def test_los_casos_de_derivacion_cuentan_el_estado_final_por_cualquiera_de_los_dos_caminos(db_observabilidad):
+    caso_b = [CASOS_METRICAS[1]]  # derivacion, categoria_esperada ESCALAR, herramientas_esperadas []
+    # camino 1: el clasificador deriva de entrada (el agente ni corre)
+    registrar(db_observabilidad, "B", "pb", 1, estado="ESCALAR", categoria="ESCALAR", agente=None, llamadas=1, t_in=None, t_out=None, respuesta=None)
+    # camino 2: el clasificador lo deja pasar y el agente llama a escalar_a_ejecutivo
+    registrar(db_observabilidad, "B", "pb", 2, estado="ESCALAR", categoria="INFORMATIVA", pasos=[("escalar_a_ejecutivo", 5)], respuesta=None)
+    # el agente investiga antes de derivar: deriva, pero con una herramienta de más
+    registrar(db_observabilidad, "B", "pb", 3, estado="ESCALAR", categoria="INFORMATIVA",
+              pasos=[("buscar_normativa", 5), ("escalar_a_ejecutivo", 5)], respuesta=None)
+    # no deriva: responde como si fuera una consulta informativa
+    registrar(db_observabilidad, "B", "pb", 4, estado="INFORMATIVA", categoria="INFORMATIVA", respuesta="Claro, ya está.")
+
+    m = calcular(caso_b, cargar_ejecuciones(db_observabilidad))
+
+    assert m["precision_clasificacion"] == {"n": 4, "correctas": 3, "precision": 0.75}  # 1, 2 y 3 terminan en ESCALAR
+    assert m["precision_herramientas"] == {"n": 4, "correctas": 2, "precision": 0.5}    # solo 1 y 2: ninguna, o solo escalar_a_ejecutivo
+
+
+def test_un_caso_que_no_es_de_derivacion_sigue_exigiendo_la_categoria_exacta(db_observabilidad):
+    # caso A (normativa, INFORMATIVA): derivar por cualquier camino NO es correcto
+    registrar(db_observabilidad, "A", "pa", 1, estado="ESCALAR", categoria="ESCALAR", agente=None, respuesta=None)
+    registrar(db_observabilidad, "A", "pa", 2, estado="ESCALAR", categoria="INFORMATIVA", pasos=[("escalar_a_ejecutivo", 5)], respuesta=None)
+    m = calcular([CASOS_METRICAS[0]], cargar_ejecuciones(db_observabilidad))
+    assert m["precision_clasificacion"] == {"n": 2, "correctas": 1, "precision": 0.5}  # solo la que el clasificador dejó pasar
+    assert m["precision_herramientas"]["correctas"] == 0
+
+
+def test_en_los_casos_no_aplica_la_consistencia_solo_mira_la_secuencia_de_herramientas(db_observabilidad):
+    # dos repeticiones con la misma secuencia pero textos que la heurística lee como veredictos distintos
+    registrar(db_observabilidad, "M", "pm", 1, respuesta="No puedes comprar alcohol.", pasos=[("consultar_historial", 5)])
+    registrar(db_observabilidad, "M", "pm", 2, respuesta="Sí puedes comprar eso.", pasos=[("consultar_historial", 5)])
+
+    sin_veredicto = calcular([CASO_MEMORIA], cargar_ejecuciones(db_observabilidad))["consistencia"]
+    assert sin_veredicto["mismo_veredicto"] is None       # no hay veredicto que comparar
+    assert sin_veredicto["misma_secuencia"] == 1.0
+    assert sin_veredicto["ambos"] == 1.0                  # cuenta solo la secuencia
+
+    con_veredicto = calcular([{**CASO_MEMORIA, "veredicto_esperado": "prohibido"}], cargar_ejecuciones(db_observabilidad))["consistencia"]
+    assert con_veredicto["mismo_veredicto"] == 0.5 and con_veredicto["ambos"] == 0.5  # el mismo dato, si hubiera veredicto
 
 
 def test_las_herramientas_se_comparan_como_conjunto_sin_orden_ni_repeticiones(db_observabilidad):
@@ -663,7 +816,7 @@ def test_los_ejemplos_no_cuentan_cuando_el_caso_activo_no_los_incluye(db_observa
     sembrar_metricas(db_observabilidad)
     solo_b = [CASOS_METRICAS[1]]
     e = metricas(db_observabilidad, casos=solo_b)["ejecuciones"]
-    assert e["consideradas"] == 2 and e["fuera_del_conjunto_excluidas"] == 6  # todo lo de A queda fuera
+    assert e["consideradas"] == 2 and e["fuera_del_conjunto_excluidas"] == 7  # todo lo de A queda fuera, también su preparación
 
 
 def test_si_una_combinacion_tiene_varias_ejecuciones_la_precision_usa_la_ultima(db_observabilidad):
@@ -744,11 +897,246 @@ def test_la_plantilla_de_etiquetas_trae_una_fila_por_ejecucion_completa_y_correc
     assert leer_etiquetas(ruta) == {}  # vacía: no hay nada etiquetado todavía
 
 
+# ------------------------------------------------------------------ por modelo
+
+
+def test_las_metricas_se_reportan_tambien_por_modelo_y_se_avisa_si_se_mezclan(db_observabilidad):
+    registrar(db_observabilidad, "A", "pa", 1, modelo="modelo-a", total=100, pasos=[("buscar_normativa", 10)])
+    registrar(db_observabilidad, "A", "pa", 2, modelo="modelo-a", total=300, pasos=[("buscar_normativa", 10)])
+    # el otro modelo deriva donde debía responder, y una de sus ejecuciones falla por 503
+    registrar(db_observabilidad, "A", "pa", 3, modelo="modelo-b", total=5000, estado="ESCALAR", categoria="ESCALAR", respuesta=None)
+    registrar(db_observabilidad, "A", "pa2", 1, modelo="modelo-b", estado="ERROR", tipo_error="503")
+
+    m = metricas(db_observabilidad)
+
+    assert m["modelos"] == ["modelo-a", "modelo-b"]
+    assert "2 modelos (modelo-a, modelo-b)" in m["aviso_modelos"] and "mezcla" in m["aviso_modelos"]
+    a, b = m["por_modelo"]["modelo-a"], m["por_modelo"]["modelo-b"]
+    assert a["precision_clasificacion"] == {"n": 2, "correctas": 2, "precision": 1.0}
+    assert b["precision_clasificacion"] == {"n": 1, "correctas": 0, "precision": 0.0}
+    assert m["precision_clasificacion"]["precision"] == pytest.approx(2 / 3)  # el global mezcla los dos
+    assert a["latencia_ms"]["por_etapa"]["total"]["p50_ms"] == 200.0          # (100 + 300) / 2
+    assert b["latencia_ms"]["por_etapa"]["total"]["p50_ms"] == 5000.0
+    assert (a["ejecuciones"]["consideradas"], b["ejecuciones"]["consideradas"], b["ejecuciones"]["con_error"]) == (2, 2, 1)
+    assert a["tasa_errores"]["por_tipo"]["503"]["n"] == 0 and b["tasa_errores"]["por_tipo"]["503"]["n"] == 1
+    assert set(b) == set(m) - {"modelos", "por_modelo", "aviso_modelos"}  # cada modelo trae todas las métricas
+
+
+def test_con_un_solo_modelo_no_hay_aviso_y_su_bloque_coincide_con_el_global(db_observabilidad):
+    sembrar_metricas(db_observabilidad)
+    m = metricas(db_observabilidad)
+    assert m["modelos"] == ["m"] and m["aviso_modelos"] is None
+    for clave in ("precision_clasificacion", "precision_herramientas", "consistencia", "latencia_ms", "consumo_por_consulta", "ejecuciones"):
+        assert m["por_modelo"]["m"][clave] == m[clave]
+
+
+def test_la_misma_combinacion_ejecutada_con_dos_modelos_cuenta_en_cada_uno(db_observabilidad):
+    registrar(db_observabilidad, "A", "pa", 1, modelo="modelo-a", pasos=[("buscar_normativa", 10)])
+    registrar(db_observabilidad, "A", "pa", 1, modelo="modelo-b", pasos=[("buscar_normativa", 10)])
+    m = metricas(db_observabilidad)
+    assert m["ejecuciones"]["unicas"] == 2
+    assert m["por_modelo"]["modelo-a"]["ejecuciones"]["unicas"] == 1
+    assert m["por_modelo"]["modelo-b"]["ejecuciones"]["unicas"] == 1
+
+
+def test_las_etiquetas_de_otro_modelo_no_se_cuentan_como_ajenas_en_el_bloque_de_un_modelo(db_observabilidad):
+    a = registrar(db_observabilidad, "A", "pa", 1, modelo="modelo-a", pasos=[("buscar_normativa", 10)])
+    b = registrar(db_observabilidad, "A", "pa", 2, modelo="modelo-b", pasos=[("buscar_normativa", 10)])
+    m = metricas(db_observabilidad, {a: {"correcto": "1"}, b: {"correcto": "0"}})
+    assert m["por_modelo"]["modelo-a"]["precision_veredicto"]["etiquetas_de_ejecuciones_ajenas"] == 0
+    assert m["por_modelo"]["modelo-a"]["precision_veredicto"]["precision_estricta"] == 1.0
+    assert m["por_modelo"]["modelo-b"]["precision_veredicto"]["precision_estricta"] == 0.0
+    assert m["precision_veredicto"]["precision_estricta"] == 0.5
+
+
+def test_el_resumen_en_consola_advierte_la_mezcla_de_modelos_y_los_separa(db_observabilidad):
+    registrar(db_observabilidad, "A", "pa", 1, modelo="modelo-a", pasos=[("buscar_normativa", 10)])
+    registrar(db_observabilidad, "A", "pa", 2, modelo="modelo-b", pasos=[("buscar_normativa", 10)])
+    texto = resumen_consola(metricas(db_observabilidad))
+    assert texto.startswith("AVISO: Hay ejecuciones de 2 modelos")
+    assert "=== GLOBAL (mezcla de modelos) ===" in texto
+    assert "=== MODELO modelo-a ===" in texto and "=== MODELO modelo-b ===" in texto
+
+
+def test_el_resumen_en_consola_con_un_solo_modelo_no_avisa_ni_muestra_el_bloque_global(db_observabilidad):
+    sembrar_metricas(db_observabilidad)
+    texto = resumen_consola(metricas(db_observabilidad))
+    assert "AVISO" not in texto and "=== MODELO m ===" in texto and "=== GLOBAL" not in texto
+
+
+def test_la_plantilla_de_etiquetas_incluye_el_modelo_de_cada_ejecucion(db_observabilidad, tmp_path):
+    registrar(db_observabilidad, "A", "pa", 1, modelo="modelo-a", pasos=[("buscar_normativa", 10)])
+    registrar(db_observabilidad, "A", "pa", 2, modelo="modelo-b", pasos=[("buscar_normativa", 10)])
+    ruta = tmp_path / "etiquetas.csv"
+    generar_plantilla_etiquetas(ruta, CASOS_METRICAS, cargar_ejecuciones(db_observabilidad))
+    with open(ruta, encoding="utf-8-sig", newline="") as f:
+        tabla = list(csv.DictReader(f))
+    assert [fila["modelo"] for fila in tabla] == ["modelo-a", "modelo-b"]
+
+
+# ------------------------------------------- plan: orden, solo principal y preparación
+
+
+def casos_plan():
+    return [caso(id="a", variantes=["a2", "a3"]), caso(id="b", pregunta="pb", variantes=["b2"])]
+
+
+def descripcion(combos):
+    return [(c.caso_id, c.variante, c.repeticion) for c in combos]
+
+
+def test_solo_principal_deja_fuera_las_variantes():
+    combos = combinaciones(casos_plan(), 2, solo_principal=True)
+    assert descripcion(combos) == [
+        ("a", "¿Puedo comprar alcohol?", 1), ("b", "pb", 1), ("a", "¿Puedo comprar alcohol?", 2), ("b", "pb", 2),
+    ]
+    assert all(c.principal for c in combos)
+    assert len(combinaciones(casos_plan(), 2)) == 10  # con variantes: (3 + 2) por repetición
+
+
+def test_el_orden_por_prioridad_va_de_principales_a_variantes_y_de_ahi_a_repeticiones():
+    combos = combinaciones(casos_plan(), 2, orden="prioridad")
+    assert descripcion(combos) == [
+        ("a", "¿Puedo comprar alcohol?", 1), ("b", "pb", 1),                       # principales, repetición 1
+        ("a", "a2", 1), ("a", "a3", 1), ("b", "b2", 1),                            # luego las variantes, repetición 1
+        ("a", "¿Puedo comprar alcohol?", 2), ("b", "pb", 2),                      # al final las repeticiones:
+        ("a", "a2", 2), ("a", "a3", 2), ("b", "b2", 2),                            # principales y luego variantes
+    ]
+    # el orden por defecto sigue siendo por repetición, sin mezclar prioridades
+    assert descripcion(combinaciones(casos_plan(), 2))[:5] == [
+        ("a", "¿Puedo comprar alcohol?", 1), ("a", "a2", 1), ("a", "a3", 1), ("b", "pb", 1), ("b", "b2", 1),
+    ]
+
+
+def test_solo_principal_y_orden_por_prioridad_se_pueden_combinar():
+    combos = combinaciones(casos_plan(), 3, solo_principal=True, orden="prioridad")
+    assert descripcion(combos) == [
+        ("a", "¿Puedo comprar alcohol?", 1), ("b", "pb", 1), ("a", "¿Puedo comprar alcohol?", 2), ("b", "pb", 2),
+        ("a", "¿Puedo comprar alcohol?", 3), ("b", "pb", 3),
+    ]
+
+
+def test_un_orden_invalido_se_rechaza():
+    with pytest.raises(ValueError, match="orden inválido"):
+        combinaciones(casos_plan(), 1, orden="caos")
+
+
+def test_cada_caso_tiene_su_propio_id_usuario_fijo():
+    combos = combinaciones(casos_plan(), 2)
+    ids = {c.caso_id: {x.id_usuario for x in combos if x.caso_id == c.caso_id} for c in combos}
+    assert ids == {"a": {"eval-a"}, "b": {"eval-b"}}  # uno solo por caso, y distinto entre casos
+    assert id_usuario_del_caso("memoria-01") == "eval-memoria-01"
+    assert {c.id_usuario for c in combinaciones(casos_plan(), 1, prefijo_id="prueba")} == {"prueba-a", "prueba-b"}
+
+
+def caso_memoria(**cambios):
+    base = dict(
+        id="memoria-01", categoria_caso="memoria", pregunta="¿Qué te pregunté la vez anterior?",
+        variantes=["¿Recuerdas mi consulta anterior?"], herramientas_esperadas=["consultar_historial"],
+        veredicto_esperado="no_aplica", fuente_esperada=None,
+    )
+    base.update(cambios)
+    return caso(**base)
+
+
+def test_la_preparacion_de_memoria_01_va_antes_de_sus_variantes_con_el_mismo_id_usuario():
+    plan = planificar([caso_memoria(), caso(id="a", variantes=[])], 2, set())
+
+    prep, primera = plan.pendientes[0], plan.pendientes[1]
+    assert prep.es_preparacion and prep.caso_id == "memoria-01-prep" and prep.caso_base == "memoria-01"
+    assert (prep.variante, prep.repeticion) == ("¿Puedo comprar alcohol con la BAES?", 1)
+    assert prep.id_usuario == "eval-memoria-01" == primera.id_usuario  # el mismo id_usuario que el caso
+    assert primera.caso_id == "memoria-01" and not primera.es_preparacion
+    assert [c.caso_id for c in plan.pendientes].count("memoria-01-prep") == 1  # una sola, aunque haya 2 repeticiones
+    assert (plan.preparaciones, plan.total, plan.saltadas) == (1, 6, 0)        # la preparación no cuenta como combinación del caso
+    assert all(c.id_usuario == "eval-a" for c in plan.pendientes if c.caso_id == "a")
+
+
+def test_la_preparacion_no_se_repite_si_ya_esta_hecha_ni_se_agrega_si_el_caso_no_tiene_pendientes():
+    texto = "¿Puedo comprar alcohol con la BAES?"
+    ya_hecha = {("memoria-01-prep", texto, 1)}
+    plan = planificar([caso_memoria()], 1, ya_hecha)
+    assert plan.preparaciones == 0 and all(not c.es_preparacion for c in plan.pendientes)
+
+    # todo el caso ya hecho: no tiene sentido preparar nada
+    hechas = {("memoria-01", "¿Qué te pregunté la vez anterior?", 1), ("memoria-01", "¿Recuerdas mi consulta anterior?", 1)}
+    assert planificar([caso_memoria()], 1, hechas).pendientes == []
+
+
+def test_el_campo_preparacion_reemplaza_al_valor_por_defecto_y_una_lista_vacia_lo_desactiva():
+    assert preparacion_de(caso_memoria()) == ["¿Puedo comprar alcohol con la BAES?"]
+    assert preparacion_de(caso_memoria(preparacion=["p1", "p2"])) == ["p1", "p2"]
+    assert preparacion_de(caso_memoria(preparacion=[])) == []
+    assert preparacion_de(caso(id="a")) == []  # solo memoria-01 trae una por defecto
+
+    plan = planificar([caso(id="x", variantes=[], preparacion=["p1", "p2"])], 1, set())
+    assert [(c.caso_id, c.variante) for c in plan.pendientes[:2]] == [("x-prep", "p1"), ("x-prep", "p2")]
+    assert plan.preparaciones == 2
+
+
+def test_la_preparacion_deja_historial_en_el_id_usuario_del_caso_y_las_metricas_la_excluyen(db_observabilidad):
+    casos = [caso(id="normativa-x", variantes=[]), caso_memoria(variantes=[])]
+    plan = planificar(casos, 1, set())
+
+    def responder_por_caso(consulta, historial, id_usuario, **kw):
+        guion = [llamada_tool("consultar_historial", {}), respuesta_final("ok")] if kw["caso_id"] == "memoria-01" else [respuesta_final("ok")]
+        return responder_con(guion, consulta=consulta, id_usuario=id_usuario, **kw)
+
+    resultado = ejecutar(plan.pendientes, responder_por_caso, **SIN_ESPERA)
+
+    assert (resultado.completadas, resultado.faltan) == (3, 0)  # normativa-x, la preparación y memoria-01
+    ejecuciones = filas(db_observabilidad, "SELECT caso_id, origen, variante FROM ejecuciones ORDER BY id")
+    assert [e["caso_id"] for e in ejecuciones] == ["normativa-x", "memoria-01-prep", "memoria-01"]
+    assert all(e["origen"] == "evaluacion" for e in ejecuciones)
+    assert ejecuciones[1]["variante"] == "¿Puedo comprar alcohol con la BAES?"
+
+    # la memoria de largo plazo: la preparación quedó en el historial del MISMO id_usuario que memoria-01...
+    historial_memoria = {h["consulta_usuario"] for h in consultar_historial_usuario("eval-memoria-01")}
+    assert "¿Puedo comprar alcohol con la BAES?" in historial_memoria
+    # ...y no se filtró al de otro caso
+    historial_otro = {h["consulta_usuario"] for h in consultar_historial_usuario("eval-normativa-x")}
+    assert historial_otro == {"¿Puedo comprar alcohol?"}
+    # memoria-01 encontró historial: lo que devolvió consultar_historial es más largo que el mensaje de "sin historial"
+    [paso] = filas(db_observabilidad, "SELECT tamano_salida FROM pasos")
+    assert paso["tamano_salida"] > len("Este estudiante no tiene interacciones registradas en sesiones anteriores.")
+
+    m = calcular(casos, cargar_ejecuciones(db_observabilidad))
+    assert m["ejecuciones"]["preparacion_excluidas"] == 1 and m["ejecuciones"]["consideradas"] == 2
+
+
+def test_si_falla_la_preparacion_se_posterga_el_resto_del_caso():
+    plan = planificar([caso_memoria(), caso(id="a", variantes=[])], 1, set())  # prep, pregunta, variante, a
+    llamadas = []
+
+    def fn(consulta, historial, id_usuario, **kw):
+        llamadas.append(kw["caso_id"])
+        if kw["caso_id"].endswith("-prep"):
+            raise RuntimeError("falló")
+        return {"estado": "INFORMATIVA"}
+
+    mensajes = []
+    resultado = ejecutar(plan.pendientes, fn, pausa=0, dormir=lambda s: None, imprimir=mensajes.append)
+
+    assert llamadas == ["memoria-01-prep", "a"]  # memoria-01 no se ejecutó sin historial; los demás casos sí
+    assert (resultado.completadas, resultado.fallidas, resultado.faltan) == (1, 1, 3)
+    assert sum("pospuesta" in m and "memoria-01" in m for m in mensajes) == 2
+
+
 # --------------------------------------------------------------- scripts (CLI)
 
 
 def correr(script, *args, db_path, **extra_env):
-    entorno = {**os.environ, "OBSERVABILIDAD_DB_PATH": str(db_path), "PYTHONIOENCODING": "utf-8", **extra_env}
+    """Corre un script en un subproceso. Siempre con la API key VACÍA (un intento
+    accidental de llamar a Gemini falla al instante) y la memoria aislada: estas
+    pruebas no pueden gastar cuota ni escribir en data/processed/memoria.db."""
+    entorno = {
+        **os.environ,
+        "OBSERVABILIDAD_DB_PATH": str(db_path),
+        "MEMORIA_DB_PATH": str(Path(db_path).with_name("memoria_cli.db")),
+        "GOOGLE_API_KEY": "",
+        "PYTHONIOENCODING": "utf-8",
+        **extra_env,
+    }
     return subprocess.run(
         [sys.executable, str(RAIZ / "scripts" / script), *map(str, args)],
         cwd=RAIZ, env=entorno, capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=180,
@@ -767,16 +1155,36 @@ def test_calcular_metricas_genera_la_plantilla_calcula_y_escribe_el_json(db_obse
     assert "generé la plantilla con 5 fila(s)" in primera.stdout
     resultado = json.loads(salida.read_text(encoding="utf-8"))
     assert resultado["precision_clasificacion"]["precision"] == 0.8
+    assert resultado["precision_herramientas"]["precision"] == 0.6
     assert resultado["precision_veredicto"]["etiquetadas"] == 0
+    assert resultado["ejecuciones"]["preparacion_excluidas"] == 1
 
-    # la estudiante etiqueta una fila; la segunda corrida NO pisa el archivo y la lee
+    # el estudiante etiqueta una fila; la segunda corrida NO pisa el archivo y la lee
     texto = etiquetas.read_text(encoding="utf-8-sig").splitlines()
     texto[1] = texto[1].replace(f"{ids['A_pa_1']},,", f"{ids['A_pa_1']},1,", 1)
     etiquetas.write_text("\n".join(texto), encoding="utf-8-sig")
     segunda = correr("calcular_metricas.py", *args, db_path=db_observabilidad)
-    assert segunda.returncode == 0, segunda.stderr and "generé la plantilla" not in segunda.stdout
+    assert segunda.returncode == 0, segunda.stderr
+    assert "generé la plantilla" not in segunda.stdout
     assert json.loads(salida.read_text(encoding="utf-8"))["precision_veredicto"]["etiquetadas"] == 1
     assert "Precisión de clasificación: 80.0% (4/5)" in segunda.stdout
+
+
+def test_calcular_metricas_reporta_por_modelo_y_advierte_si_hay_mas_de_uno(db_observabilidad, tmp_path):
+    registrar(db_observabilidad, "A", "pa", 1, modelo="modelo-a", pasos=[("buscar_normativa", 10)])
+    registrar(db_observabilidad, "A", "pa", 2, modelo="modelo-b", pasos=[("buscar_normativa", 10)])
+    casos = tmp_path / "casos.json"
+    casos.write_text(json.dumps({"casos": CASOS_METRICAS}), encoding="utf-8")
+    salida = tmp_path / "m.json"
+
+    r = correr("calcular_metricas.py", "--casos-path", casos, "--etiquetas", tmp_path / "e.csv", "--salida", salida, db_path=db_observabilidad)
+
+    assert r.returncode == 0, r.stderr
+    assert "AVISO: Hay ejecuciones de 2 modelos (modelo-a, modelo-b)" in r.stdout
+    assert "=== MODELO modelo-a ===" in r.stdout and "=== MODELO modelo-b ===" in r.stdout
+    resultado = json.loads(salida.read_text(encoding="utf-8"))
+    assert resultado["modelos"] == ["modelo-a", "modelo-b"] and set(resultado["por_modelo"]) == {"modelo-a", "modelo-b"}
+    assert resultado["aviso_modelos"]
 
 
 def test_calcular_metricas_rechaza_etiquetas_invalidas_y_casos_invalidos(db_observabilidad, tmp_path):
@@ -792,10 +1200,12 @@ def test_calcular_metricas_rechaza_etiquetas_invalidas_y_casos_invalidos(db_obse
     assert r.returncode == 2 and "veredicto_esperado" in r.stderr
 
 
-def test_evaluar_agente_sin_casos_reales_o_sin_pendientes_no_llama_a_gemini(db_observabilidad, tmp_path):
-    # solo hay ejemplos en eval/casos.json: se ignoran y el script termina sin importar el agente
-    r = correr("evaluar_agente.py", db_path=db_observabilidad)
+def test_evaluar_agente_imprime_el_modelo_activo_y_no_hace_nada_sin_casos_reales_o_sin_pendientes(db_observabilidad, tmp_path):
+    solo_ejemplos = tmp_path / "ejemplos.json"
+    solo_ejemplos.write_text(json.dumps({"casos": [caso(ejemplo=True)]}), encoding="utf-8")
+    r = correr("evaluar_agente.py", "--casos-path", solo_ejemplos, db_path=db_observabilidad, GEMINI_MODEL="modelo-de-prueba")
     assert r.returncode == 0 and "No hay casos para evaluar" in r.stdout
+    assert r.stdout.splitlines()[0] == "Modelo activo: modelo-de-prueba (proveedor: gemini)"  # lo primero que imprime
     assert not db_observabilidad.exists()
 
     # con todo ya hecho en la base tampoco hay nada que correr
@@ -806,7 +1216,28 @@ def test_evaluar_agente_sin_casos_reales_o_sin_pendientes_no_llama_a_gemini(db_o
     assert r.returncode == 0 and "1 ya estaban en la base, 0 pendientes" in r.stdout and "Nada que hacer" in r.stdout
 
 
-@pytest.mark.parametrize("argumento", [("--repeticiones", "0"), ("--limite", "0"), ("--pausa", "-1")])
+def test_evaluar_agente_con_los_14_casos_reales_planifica_y_no_puede_llamar_a_gemini(db_observabilidad):
+    r = correr(
+        "evaluar_agente.py", "--solo-principal", "--orden", "--repeticiones", "1", "--pausa", "0", "--limite", "1",
+        db_path=db_observabilidad, GEMINI_MODEL="modelo-de-prueba",
+    )
+
+    assert r.returncode == 0, r.stderr
+    assert r.stdout.splitlines()[0] == "Modelo activo: modelo-de-prueba (proveedor: gemini)"
+    assert (
+        "14 caso(s), 1 repetición(es), solo la pregunta principal, orden prioridad: "
+        "14 combinaciones, 0 ya estaban en la base, 14 pendientes (más 1 consulta(s) de preparación)."
+    ) in r.stdout
+    # sin API key el primer intento falla al instante: no hubo ninguna llamada real
+    assert "[1/15] normativa-02 rep 1: ERROR RuntimeError" in r.stdout
+    assert "Completadas: 0 | fallidas: 1" in r.stdout and "se alcanzó --limite 1" in r.stdout
+    assert "Modelo: modelo-de-prueba" in r.stdout.split("--- Resumen ---")[1]
+    assert filas(db_observabilidad, "SELECT caso_id, estado, tipo_error, modelo FROM ejecuciones") == [
+        {"caso_id": "normativa-02", "estado": "ERROR", "tipo_error": "otro", "modelo": "modelo-de-prueba"}
+    ]
+
+
+@pytest.mark.parametrize("argumento", [("--repeticiones", "0"), ("--limite", "0"), ("--pausa", "-1"), ("--orden", "caos")])
 def test_evaluar_agente_rechaza_parametros_invalidos(db_observabilidad, argumento):
     r = correr("evaluar_agente.py", *argumento, db_path=db_observabilidad)
     assert r.returncode == 2 and "error:" in r.stderr
@@ -814,7 +1245,7 @@ def test_evaluar_agente_rechaza_parametros_invalidos(db_observabilidad, argument
 
 def test_evaluar_agente_rechaza_ids_inexistentes_y_casos_invalidos(db_observabilidad, tmp_path):
     r = correr("evaluar_agente.py", "--casos", "no_existe", db_path=db_observabilidad)
-    assert r.returncode == 2 and "ejemplos sin --incluir-ejemplos" in r.stderr  # los ejemplos no cuentan sin esa opción
+    assert r.returncode == 2 and "Ids que no existen" in r.stderr and "no_existe" in r.stderr
 
     casos = tmp_path / "casos.json"
     casos.write_text(json.dumps({"casos": [caso(id="a")]}), encoding="utf-8")
@@ -826,6 +1257,38 @@ def test_evaluar_agente_rechaza_ids_inexistentes_y_casos_invalidos(db_observabil
     assert r.returncode == 2 and "categoria_caso" in r.stderr
 
 
-def test_evaluar_recuperacion_sin_casos_con_fuente_termina_sin_cargar_el_indice(db_observabilidad):
-    r = correr("evaluar_recuperacion.py", db_path=db_observabilidad)
-    assert r.returncode == 0 and "No hay casos con 'fuente_esperada'" in r.stdout
+def test_evaluar_agente_muestra_los_avisos_del_esquema_pero_sigue(db_observabilidad, tmp_path):
+    casos = tmp_path / "casos.json"
+    casos.write_text(json.dumps({"casos": [caso(id="a", variantes=[], veredicto_esperdo="x")]}), encoding="utf-8")
+    registrar(db_observabilidad, "a", "¿Puedo comprar alcohol?", 1)
+    r = correr("evaluar_agente.py", "--casos-path", casos, "--repeticiones", "1", db_path=db_observabilidad)
+    assert r.returncode == 0 and "Aviso: caso #1" in r.stderr and "'veredicto_esperdo'" in r.stderr
+
+
+def test_evaluar_recuperacion_informa_cuantos_casos_omitio_y_no_carga_el_indice_si_no_hay_evaluables(db_observabilidad, tmp_path):
+    casos = tmp_path / "casos.json"
+    casos.write_text(
+        json.dumps({"casos": [caso(id="a", fuente_esperada=""), caso(id="b", pregunta="pb", fuente_esperada=None)]}),
+        encoding="utf-8",
+    )
+    r = correr("evaluar_recuperacion.py", "--casos-path", casos, db_path=db_observabilidad)
+    assert r.returncode == 0, r.stderr
+    assert "Omití 2 caso(s) sin 'fuente_esperada'" in r.stdout and "a, b" in r.stdout
+    assert "No hay casos con 'fuente_esperada'" in r.stdout
+
+
+def test_separar_evaluables_omite_los_casos_sin_fuente_y_evaluar_no_los_consulta():
+    casos = [
+        caso(id="a"),
+        caso(id="b", pregunta="pb", fuente_esperada=""),
+        caso(id="c", pregunta="pc", fuente_esperada=None),
+        caso(id="d", pregunta="pd", fuente_esperada="   "),
+        caso(id="e", pregunta="pe", fuente_esperada=...),  # sin el campo
+    ]
+    evaluables, omitidos = separar_evaluables(casos)
+    assert [c["id"] for c in evaluables] == ["a"]
+    assert [c["id"] for c in omitidos] == ["b", "c", "d", "e"]
+
+    consultas = []
+    evaluar(casos, lambda c, k: consultas.append(c) or [], k=3)
+    assert consultas == ["¿Puedo comprar alcohol?", "¿Se puede comprar cerveza?"]  # solo las del caso con fuente

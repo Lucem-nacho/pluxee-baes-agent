@@ -2,9 +2,15 @@
 
 Solo cuentan las ejecuciones con origen "evaluacion" que pertenecen al
 conjunto de casos activo: se excluyen (y se informan) las que no tienen
-`caso_id` (p. ej. las de `scripts/check_agent_executor.py`), las de casos o
-variantes que ya no están en `casos.json`, y las de casos marcados "ejemplo"
-cuando no se pidió incluirlos.
+`caso_id` (p. ej. las de `scripts/check_agent_executor.py`), las consultas de
+preparación (`<caso>-prep`, ver eval_agente.py), las de casos o variantes que
+ya no están en `casos.json`, y las de casos marcados "ejemplo" cuando no se
+pidió incluirlos.
+
+POR MODELO: el resultado trae el bloque global y, además, el mismo cálculo
+completo por cada modelo (`por_modelo`), tomando el modelo registrado en cada
+ejecución. Si hay más de uno, `aviso_modelos` lo advierte: el bloque global
+mezcla modelos y no debe leerse como el desempeño de ninguno de ellos.
 
 Qué ejecuciones entran en cada métrica:
 - `tasa_errores`: todas las consideradas, ERROR incluidas (para eso existe).
@@ -15,16 +21,24 @@ Qué ejecuciones entran en cada métrica:
 
 Definiciones:
 - precisión de clasificación: `categoria` registrada == `categoria_esperada`.
+  En los casos de `derivacion` cuenta como correcto el estado FINAL ESCALAR por
+  cualquiera de los dos caminos: que el clasificador derive de entrada, o que
+  el agente llame a `escalar_a_ejecutivo`.
 - precisión de herramientas: el CONJUNTO de herramientas usadas == el conjunto
   esperado (el orden y las repeticiones no importan; usar una de más o una de
-  menos cuenta como fallo).
+  menos cuenta como fallo). En un caso de `derivacion` con
+  `herramientas_esperadas` = [], se aceptan los dos caminos: ninguna
+  herramienta, o solo `escalar_a_ejecutivo`, siempre que el estado final sea
+  ESCALAR (cualquier otra herramienta antes de derivar cuenta como fallo).
 - precisión de veredicto: viene de las etiquetas del estudiante (CSV con
   `id_ejecucion`, `correcto` = 1 | 0 | parcial, `comentario`). `precision_estricta`
   = correctas / etiquetadas; `precision_ponderada` cuenta `parcial` como 0,5.
 - consistencia: para cada (caso, variante) con 2 o más repeticiones, qué
   fracción de las repeticiones coincide con la más frecuente, en veredicto, en
   secuencia de herramientas y en ambos a la vez (la métrica pedida).
-  Las repeticiones se comparan solo entre la misma variante.
+  Las repeticiones se comparan solo entre la misma variante. En los casos con
+  `veredicto_esperado` = no_aplica (p. ej. memoria) no hay veredicto que
+  comparar: para ellos cuenta solo la secuencia de herramientas.
 - veredicto de una ejecución (para la consistencia): HEURÍSTICO. ESCALAR ->
   derivar; ERROR -> error; sin_respuesta / limite_iteraciones -> no_confirmable;
   si no, se buscan marcas en el texto de la respuesta, con prioridad
@@ -39,12 +53,12 @@ Definiciones:
 import csv
 import json
 import math
+import unicodedata
 from collections import Counter, defaultdict
 from pathlib import Path
 
 from observabilidad import store
-from observabilidad.casos import VEREDICTOS, preguntas_del_caso
-from observabilidad.eval_recuperacion import normalizar
+from observabilidad.casos import SUFIJO_PREPARACION, VEREDICTOS, preguntas_del_caso
 from observabilidad.privacidad import enmascarar
 
 COLUMNAS_ETIQUETAS = (
@@ -56,6 +70,7 @@ COLUMNAS_ETIQUETAS = (
     "variante",
     "repeticion",
     "veredicto_esperado",
+    "modelo",
     "respuesta",
 )
 VALORES_CORRECTO = ("1", "0", "parcial")
@@ -95,6 +110,13 @@ def percentil(valores: list[float], p: float) -> float | None:
     bajo = math.floor(posicion)
     alto = min(bajo + 1, len(orden) - 1)
     return orden[bajo] + (orden[alto] - orden[bajo]) * (posicion - bajo)
+
+
+def _sin_tildes(texto: str) -> str:
+    """Minúsculas, sin tildes y con espacios colapsados: para buscar las marcas
+    de la heurística de veredicto sin depender de cómo escribió el modelo."""
+    sin = unicodedata.normalize("NFKD", texto).encode("ascii", "ignore").decode()
+    return " ".join(sin.casefold().split())
 
 
 def _resumen_latencia(valores: list[float]) -> dict:
@@ -146,7 +168,7 @@ def veredicto_observado(ejecucion: dict, override: str | None = None) -> str:
         return "error"
     if ejecucion["tipo_error"] in ("sin_respuesta", "limite_iteraciones"):
         return "no_confirmable"
-    texto = normalizar(ejecucion.get("respuesta") or "")
+    texto = _sin_tildes(ejecucion.get("respuesta") or "")
     for veredicto, marcas in (
         ("no_confirmable", _MARCAS_NO_CONFIRMABLE),
         ("prohibido", _MARCAS_PROHIBIDO),
@@ -160,31 +182,51 @@ def veredicto_observado(ejecucion: dict, override: str | None = None) -> str:
 # ------------------------------------------------------------------- selección
 
 
-def seleccionar(casos: list[dict], ejecuciones: list[dict]) -> tuple[list[dict], int, int]:
-    """(consideradas, sin_caso, fuera_del_conjunto) entre las de origen evaluacion."""
+def seleccionar(casos: list[dict], ejecuciones: list[dict]) -> tuple[list[dict], int, int, int]:
+    """(consideradas, sin_caso, fuera_del_conjunto, preparacion) entre las de
+    origen evaluacion. `preparacion` son las consultas `<caso>-prep`."""
     por_id = {c["id"]: c for c in casos}
     textos = {c["id"]: {enmascarar(t) for t in preguntas_del_caso(c)} for c in casos}
-    consideradas, sin_caso, fuera = [], 0, 0
+    consideradas, sin_caso, fuera, preparacion = [], 0, 0, 0
     for e in ejecuciones:
         if e["origen"] != "evaluacion":
             continue
-        if e["caso_id"] is None:
+        caso_id = e["caso_id"]
+        if caso_id is None:
             sin_caso += 1
-        elif e["caso_id"] not in por_id or e["variante"] not in textos[e["caso_id"]]:
+        elif caso_id not in por_id and caso_id.endswith(SUFIJO_PREPARACION) and caso_id[: -len(SUFIJO_PREPARACION)] in por_id:
+            preparacion += 1
+        elif caso_id not in por_id or e["variante"] not in textos[caso_id]:
             fuera += 1
         else:
             consideradas.append(e)
-    return consideradas, sin_caso, fuera
+    return consideradas, sin_caso, fuera, preparacion
 
 
 def deduplicar(ejecuciones: list[dict]) -> list[dict]:
-    """Una ejecución por (caso, variante, repetición): la de mayor id."""
+    """Una ejecución por (modelo, caso, variante, repetición): la de mayor id.
+    El modelo es parte de la clave para no descartar la ejecución de un modelo
+    porque otro ya cubrió la misma combinación."""
     ultimas: dict[tuple, dict] = {}
     for e in ejecuciones:
-        ultimas[(e["caso_id"], e["variante"], e["repeticion"])] = max(
-            ultimas.get((e["caso_id"], e["variante"], e["repeticion"]), e), e, key=lambda x: x["id"]
-        )
+        clave = (e["modelo"], e["caso_id"], e["variante"], e["repeticion"])
+        ultimas[clave] = max(ultimas.get(clave, e), e, key=lambda x: x["id"])
     return sorted(ultimas.values(), key=lambda x: x["id"])
+
+
+def clasificacion_correcta(ejecucion: dict, caso: dict) -> bool:
+    if caso["categoria_caso"] == "derivacion":
+        return ejecucion["estado"] == "ESCALAR"  # por cualquiera de los dos caminos
+    return ejecucion["categoria"] == caso["categoria_esperada"]
+
+
+def herramientas_correctas(ejecucion: dict, caso: dict) -> bool:
+    usadas = set(ejecucion["herramientas"])
+    if caso["categoria_caso"] == "derivacion" and not caso["herramientas_esperadas"]:
+        # [] acepta los dos caminos: ninguna herramienta (deriva el clasificador)
+        # o solo escalar_a_ejecutivo (deriva el agente).
+        return ejecucion["estado"] == "ESCALAR" and usadas <= {"escalar_a_ejecutivo"}
+    return usadas == set(caso["herramientas_esperadas"])
 
 
 # ---------------------------------------------------------------- etiquetas
@@ -246,7 +288,7 @@ def generar_plantilla_etiquetas(ruta: str | Path, casos: list[dict], ejecuciones
     `correcto` y `comentario` vacíos y columnas de contexto (caso, pregunta,
     veredicto esperado, respuesta) para poder etiquetar sin abrir la base.
     Devuelve cuántas filas escribió."""
-    consideradas, _, _ = seleccionar(casos, ejecuciones)
+    consideradas = seleccionar(casos, ejecuciones)[0]
     unicas = deduplicar([e for e in consideradas if e["estado"] != "ERROR"])
     esperado = {c["id"]: c["veredicto_esperado"] for c in casos}
 
@@ -257,7 +299,7 @@ def generar_plantilla_etiquetas(ruta: str | Path, casos: list[dict], ejecuciones
         escritor.writerow(COLUMNAS_ETIQUETAS)
         for e in unicas:
             escritor.writerow(
-                [e["id"], "", "", e["caso_id"], e["variante"], e["repeticion"], esperado[e["caso_id"]], e["respuesta"] or ""]
+                [e["id"], "", "", e["caso_id"], e["variante"], e["repeticion"], esperado[e["caso_id"]], e["modelo"], e["respuesta"] or ""]
             )
     return len(unicas)
 
@@ -265,28 +307,33 @@ def generar_plantilla_etiquetas(ruta: str | Path, casos: list[dict], ejecuciones
 # ------------------------------------------------------------------- cálculo
 
 
-def _consistencia(ejecuciones: list[dict], etiquetas: dict[int, dict]) -> dict:
+def _consistencia(ejecuciones: list[dict], etiquetas: dict[int, dict], por_id: dict[str, dict]) -> dict:
     grupos: dict[tuple, list[dict]] = defaultdict(list)
     for e in ejecuciones:
         grupos[(e["caso_id"], e["variante"])].append(e)
 
     def sumar(conjunto: list[list[dict]]) -> dict:
-        total = veredicto = secuencia = ambos = 0
+        total = total_veredicto = veredicto = secuencia = ambos = 0
         for grupo in conjunto:
+            con_veredicto = por_id[grupo[0]["caso_id"]]["veredicto_esperado"] != "no_aplica"
             pares = [
                 (veredicto_observado(e, (etiquetas.get(e["id"]) or {}).get("veredicto_observado")), e["herramientas"])
                 for e in grupo
             ]
+            moda_secuencia = Counter(p[1] for p in pares).most_common(1)[0][1]
             total += len(pares)
-            veredicto += Counter(p[0] for p in pares).most_common(1)[0][1]
-            secuencia += Counter(p[1] for p in pares).most_common(1)[0][1]
-            ambos += Counter(pares).most_common(1)[0][1]
-        fraccion = lambda x: (x / total) if total else None
+            secuencia += moda_secuencia
+            if con_veredicto:
+                total_veredicto += len(pares)
+                veredicto += Counter(p[0] for p in pares).most_common(1)[0][1]
+                ambos += Counter(pares).most_common(1)[0][1]
+            else:
+                ambos += moda_secuencia  # sin veredicto que comparar, cuenta solo la secuencia
         return {
             "repeticiones": total,
-            "mismo_veredicto": fraccion(veredicto),
-            "misma_secuencia": fraccion(secuencia),
-            "ambos": fraccion(ambos),
+            "mismo_veredicto": (veredicto / total_veredicto) if total_veredicto else None,
+            "misma_secuencia": (secuencia / total) if total else None,
+            "ambos": (ambos / total) if total else None,
         }
 
     evaluables = [g for g in grupos.values() if len(g) >= 2]
@@ -303,16 +350,39 @@ def _consistencia(ejecuciones: list[dict], etiquetas: dict[int, dict]) -> dict:
 
 
 def calcular(casos: list[dict], ejecuciones: list[dict], etiquetas: dict[int, dict] | None = None) -> dict:
+    """Todas las métricas, globales y por modelo. Las claves de primer nivel
+    del bloque global son las de `_calcular`; se agregan `modelos`, `por_modelo`
+    (el mismo cálculo completo por cada modelo) y `aviso_modelos`."""
     etiquetas = etiquetas or {}
+    resultado = _calcular(casos, ejecuciones, etiquetas)
+
+    consideradas = seleccionar(casos, ejecuciones)[0]
+    modelos = sorted({e["modelo"] for e in consideradas})
+    por_modelo = {}
+    for modelo in modelos:
+        suyas = [e for e in ejecuciones if e["modelo"] == modelo]
+        ids = {e["id"] for e in suyas}
+        por_modelo[modelo] = _calcular(casos, suyas, {i: v for i, v in etiquetas.items() if i in ids})
+
+    resultado["modelos"] = modelos
+    resultado["por_modelo"] = por_modelo
+    resultado["aviso_modelos"] = (
+        f"Hay ejecuciones de {len(modelos)} modelos ({', '.join(modelos)}): el bloque global los mezcla y "
+        "no representa a ninguno; compara usando 'por_modelo'."
+        if len(modelos) > 1
+        else None
+    )
+    return resultado
+
+
+def _calcular(casos: list[dict], ejecuciones: list[dict], etiquetas: dict[int, dict]) -> dict:
     por_id = {c["id"]: c for c in casos}
-    consideradas, sin_caso, fuera = seleccionar(casos, ejecuciones)
+    consideradas, sin_caso, fuera, preparacion = seleccionar(casos, ejecuciones)
     completas = [e for e in consideradas if e["estado"] != "ERROR"]
     unicas = deduplicar(completas)
 
-    clasificacion = [(e, e["categoria"] == por_id[e["caso_id"]]["categoria_esperada"]) for e in unicas]
-    herramientas = [
-        (e, set(e["herramientas"]) == set(por_id[e["caso_id"]]["herramientas_esperadas"])) for e in unicas
-    ]
+    clasificacion = [(e, clasificacion_correcta(e, por_id[e["caso_id"]])) for e in unicas]
+    herramientas = [(e, herramientas_correctas(e, por_id[e["caso_id"]])) for e in unicas]
 
     # --- veredicto, a partir de las etiquetas del estudiante
     ids_completas = {e["id"] for e in completas}
@@ -372,7 +442,7 @@ def calcular(casos: list[dict], ejecuciones: list[dict], etiquetas: dict[int, di
         }
 
     # --- por caso
-    consistencia = _consistencia(unicas, etiquetas)
+    consistencia = _consistencia(unicas, etiquetas, por_id)
     por_caso = {}
     for caso_id in sorted({e["caso_id"] for e in unicas}):
         suyas = [e for e in unicas if e["caso_id"] == caso_id]
@@ -388,6 +458,7 @@ def calcular(casos: list[dict], ejecuciones: list[dict], etiquetas: dict[int, di
         "ejecuciones": {
             "evaluacion_total": sum(1 for e in ejecuciones if e["origen"] == "evaluacion"),
             "sin_caso_excluidas": sin_caso,
+            "preparacion_excluidas": preparacion,
             "fuera_del_conjunto_excluidas": fuera,
             "consideradas": len(consideradas),
             "completas": len(completas),
@@ -416,12 +487,13 @@ def _pct(valor: float | None) -> str:
     return "—" if valor is None else f"{valor * 100:.1f}%"
 
 
-def resumen_consola(m: dict) -> str:
+def _bloque(m: dict) -> list[str]:
     e = m["ejecuciones"]
     lineas = [
         f"Ejecuciones de evaluación: {e['evaluacion_total']} en la base | consideradas {e['consideradas']} "
         f"(completas {e['completas']}, con error {e['con_error']}, únicas {e['unicas']})",
-        f"  excluidas: {e['sin_caso_excluidas']} sin caso, {e['fuera_del_conjunto_excluidas']} fuera del conjunto activo",
+        f"  excluidas: {e['sin_caso_excluidas']} sin caso, {e['preparacion_excluidas']} de preparación, "
+        f"{e['fuera_del_conjunto_excluidas']} fuera del conjunto activo",
         "",
     ]
     for nombre, clave in (("Precisión de clasificación", "precision_clasificacion"), ("Precisión de herramientas", "precision_herramientas")):
@@ -451,4 +523,17 @@ def resumen_consola(m: dict) -> str:
         f"Por consulta: {k['llamadas_llm_promedio']} llamadas al LLM, {k['tokens_entrada_promedio']} tokens de entrada, "
         f"{k['tokens_salida_promedio']} de salida (promedios; tokens en {k['consultas_con_tokens']}/{k['consultas']} consultas)"
     )
+    return lineas
+
+
+def resumen_consola(m: dict) -> str:
+    modelos = m["modelos"]
+    lineas: list[str] = []
+    if m["aviso_modelos"]:
+        lineas += [f"AVISO: {m['aviso_modelos']}", ""]
+    titulo = "GLOBAL (mezcla de modelos)" if len(modelos) > 1 else f"MODELO {modelos[0]}" if modelos else "GLOBAL"
+    lineas += [f"=== {titulo} ==="] + _bloque(m)
+    if len(modelos) > 1:
+        for modelo in modelos:
+            lineas += ["", f"=== MODELO {modelo} ==="] + _bloque(m["por_modelo"][modelo])
     return "\n".join(lineas)

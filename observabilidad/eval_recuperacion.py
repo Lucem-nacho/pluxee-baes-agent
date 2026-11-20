@@ -9,8 +9,14 @@ Para la pregunta original y cada variante de cada caso con `fuente_esperada`:
 - MRR: promedio de 1/rango (0 cuando no hay acierto).
 
 Un fragmento "contiene" la fuente esperada si el texto esperado aparece en el
-texto del fragmento o en el nombre de su fuente, sin distinguir mayúsculas,
-tildes ni saltos de línea (los PDFs cortan las frases a mitad de renglón).
+texto del fragmento o en el nombre de su fuente, después de normalizar ambos:
+se ignoran las mayúsculas y los espacios y saltos de línea repetidos (los PDFs
+cortan las frases a mitad de renglón). Las tildes NO se ignoran; sí se
+unifican las formas equivalentes de un mismo carácter (NFKC: una "é" escrita
+como "e" + acento, o la ligadura "ﬁ" que deja la extracción de PDF).
+
+Los casos con `fuente_esperada` vacía (comercios, derivación, memoria) se
+omiten: `separar_evaluables` los devuelve aparte para poder informar cuántos fueron.
 
 Mide la recuperación vectorial "cruda": no incluye el arbitraje por recencia
 que aplica `buscar_normativa` después, ni lo que el agente reformula antes de
@@ -31,8 +37,7 @@ COLUMNAS_CSV = ("caso_id", "categoria_caso", "variante", "fuente_esperada", "ran
 
 
 def normalizar(texto: str) -> str:
-    sin_tildes = unicodedata.normalize("NFKD", texto).encode("ascii", "ignore").decode()
-    return " ".join(sin_tildes.casefold().split())
+    return " ".join(unicodedata.normalize("NFKC", texto).casefold().split())
 
 
 def contiene_la_fuente(fragmento: dict, fuente_esperada: str) -> bool:
@@ -64,15 +69,21 @@ def mrr(rangos: list[int | None]) -> float:
     return sum(1 / r for r in rangos if r is not None) / len(rangos)
 
 
+def separar_evaluables(casos: list[dict]) -> tuple[list[dict], list[dict]]:
+    """(evaluables, omitidos): los casos con `fuente_esperada` no vacía y los que
+    no la tienen (vacía, null o ausente)."""
+    evaluables = [c for c in casos if (c.get("fuente_esperada") or "").strip()]
+    omitidos = [c for c in casos if not (c.get("fuente_esperada") or "").strip()]
+    return evaluables, omitidos
+
+
 def evaluar(
     casos: list[dict], recuperar_fn: Callable[[str, int], list[dict]], k: int = K_POR_DEFECTO
 ) -> list[dict]:
     """Una fila por (caso, pregunta o variante) de los casos con `fuente_esperada`."""
     filas = []
-    for caso in casos:
+    for caso in separar_evaluables(casos)[0]:
         fuente = caso["fuente_esperada"]
-        if not fuente:
-            continue
         for texto in preguntas_del_caso(caso):
             rango = rango_del_primer_acierto(recuperar_fn(texto, k), fuente)
             filas.append(
