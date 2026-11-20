@@ -20,6 +20,11 @@ Definiciones de las métricas:
   `llm.client.generar_respuesta` devuelve solo el texto, y exponer el uso
   habría exigido cambiar su firma. Por eso son NULL cuando el clasificador
   deriva sin que el agente corra.
+- `caso_id`, `variante`, `repeticion`: identifican la ejecución dentro de un
+  conjunto de evaluación (`eval/casos.json`); NULL en el uso normal.
+  `variante` es el texto exacto de la pregunta enviada (la original o una de
+  sus variantes), no un número: así, si se edita una pregunta del conjunto,
+  sus ejecuciones viejas dejan de coincidir en vez de mezclarse con las nuevas.
 - `estado`: INFORMATIVA, ESCALAR o ERROR (la ejecución terminó en excepción).
 - `categoria`: lo que decidió el clasificador; NULL si falló antes de decidir.
 """
@@ -74,6 +79,9 @@ class Medicion:
     latencia_agente_ms: int | None = None
     llamadas_clasificador: int = 0
     registro_pasos: RegistroPasos | None = None
+    caso_id: str | None = None
+    variante: str | None = None
+    repeticion: int | None = None
 
     @contextmanager
     def medir(self, etapa: str):
@@ -130,6 +138,9 @@ class Medicion:
                 "tipo_error": tipo_error,
                 "modelo": settings.GEMINI_MODEL,
                 "respuesta": respuesta[:LONGITUD_MAX_RESPUESTA] if respuesta is not None else None,
+                "caso_id": self.caso_id,
+                "variante": enmascarar(self.variante),
+                "repeticion": self.repeticion,
             }
             store.registrar_ejecucion(ejecucion, rp.pasos_finales() if rp else [])
         except Exception:

@@ -88,7 +88,14 @@ MENSAJE_SIN_RESPUESTA = (
 
 
 def responder(
-    consulta_usuario: str, historial_contexto: str, id_usuario: str, origen: str = "app"
+    consulta_usuario: str,
+    historial_contexto: str,
+    id_usuario: str,
+    origen: str = "app",
+    *,
+    caso_id: str | None = None,
+    variante: str | None = None,
+    repeticion: int | None = None,
 ) -> dict:
     """Punto de entrada único que usa `app.py`.
 
@@ -99,7 +106,9 @@ def responder(
 
     `origen` ("app" por defecto, o "evaluacion") solo marca la ejecución en
     la base de observabilidad, para que los scripts de evaluación no se
-    mezclen con el uso real.
+    mezclen con el uso real. `caso_id`, `variante` y `repeticion` (opcionales)
+    identifican la ejecución dentro de un conjunto de evaluación; el uso
+    normal no los pasa.
 
     Devuelve `{"estado": "INFORMATIVA", "respuesta": ..., "pasos": [...]}`
     o `{"estado": "ESCALAR", ...}` — ambas formas comparten la clave
@@ -108,7 +117,14 @@ def responder(
     if origen not in observabilidad_store.ORIGENES:
         raise ValueError(f"origen inválido: {origen!r} (debe ser uno de {observabilidad_store.ORIGENES})")
 
-    medicion = Medicion(origen=origen, id_usuario=id_usuario, consulta=consulta_usuario)
+    medicion = Medicion(
+        origen=origen,
+        id_usuario=id_usuario,
+        consulta=consulta_usuario,
+        caso_id=caso_id,
+        variante=variante,
+        repeticion=repeticion,
+    )
     try:
         resultado = _responder(consulta_usuario, historial_contexto, id_usuario, medicion)
         medicion.registrar_resultado(resultado)

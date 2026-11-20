@@ -567,4 +567,7 @@ def test_la_barra_lateral_avisa_que_las_consultas_se_registran():
 
     assert not at.exception
     textos = [c.value for c in at.sidebar.caption]
-    assert any("se registran de forma anónima" in t for t in textos), textos
+    [aviso] = [t for t in textos if "se registran" in t]
+    assert "datos personales enmascarados" in aviso
+    assert "identificador seudonimizado" in aviso
+    assert "anónim" not in aviso  # es seudonimización, no anonimato

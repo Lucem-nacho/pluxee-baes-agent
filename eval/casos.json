@@ -1,0 +1,56 @@
+{
+  "esquema": {
+    "id": "Identificador único del caso: letras, números, '_' o '-', sin espacios.",
+    "categoria_caso": "Tipo de caso: normativa | comercio | derivar | memoria.",
+    "pregunta": "La pregunta original, tal como la escribiría un estudiante.",
+    "variantes": "Lista de reformulaciones de la misma pregunta (puede ser []). Se evalúan igual que la original.",
+    "categoria_esperada": "Lo que debe decidir el clasificador: INFORMATIVA | ESCALAR.",
+    "herramientas_esperadas": "Herramientas que el agente debe usar, como conjunto sin repetidos (el orden no importa): buscar_normativa, buscar_comercio, consultar_historial, escalar_a_ejecutivo. Con categoria_esperada ESCALAR debe ser [] porque el agente no llega a correr.",
+    "veredicto_esperado": "Respuesta correcta: permitido | prohibido | no_confirmable (las fuentes no alcanzan para confirmar) | derivar.",
+    "fuente_esperada": "Texto que debe aparecer en el fragmento recuperado o en el nombre de su fuente (se compara sin mayúsculas ni tildes). null si el caso no depende del índice vectorial, p. ej. los comercios, que viven en una tabla SQL.",
+    "ejemplo": "(opcional) true marca un caso de muestra: los scripts lo ignoran salvo con --incluir-ejemplos. Los casos reales no lo llevan.",
+    "notas": "(opcional) Texto libre para ti."
+  },
+  "casos": [
+    {
+      "id": "ej_normativa_alcohol",
+      "categoria_caso": "normativa",
+      "pregunta": "¿Puedo comprar alcohol con la BAES?",
+      "variantes": [
+        "¿Se puede comprar cerveza o vino con la BAES?",
+        "¿La BAES sirve para comprar bebidas alcohólicas?"
+      ],
+      "categoria_esperada": "INFORMATIVA",
+      "herramientas_esperadas": ["buscar_normativa"],
+      "veredicto_esperado": "prohibido",
+      "fuente_esperada": "alcohol, tabaco",
+      "ejemplo": true
+    },
+    {
+      "id": "ej_comercio_jumbo_alcohol",
+      "categoria_caso": "comercio",
+      "pregunta": "¿Puedo comprar alcohol en el Jumbo de Providencia con la BAES?",
+      "variantes": [
+        "¿En el Jumbo Providencia puedo pagar cerveza con la BAES?"
+      ],
+      "categoria_esperada": "INFORMATIVA",
+      "herramientas_esperadas": ["buscar_comercio", "buscar_normativa"],
+      "veredicto_esperado": "prohibido",
+      "fuente_esperada": null,
+      "ejemplo": true
+    },
+    {
+      "id": "ej_derivar_cobro_duplicado",
+      "categoria_caso": "derivar",
+      "pregunta": "Me cobraron dos veces en el mismo local, quiero que me devuelvan la plata.",
+      "variantes": [
+        "Me hicieron un cargo doble en un supermercado, ¿me reembolsan?"
+      ],
+      "categoria_esperada": "ESCALAR",
+      "herramientas_esperadas": [],
+      "veredicto_esperado": "derivar",
+      "fuente_esperada": null,
+      "ejemplo": true
+    }
+  ]
+}

@@ -45,7 +45,13 @@ _COLUMNAS_EJECUCION = (
     "tipo_error",
     "modelo",
     "respuesta",
+    "caso_id",
+    "variante",
+    "repeticion",
 )
+# Columnas agregadas después de la primera versión del esquema: las bases ya
+# existentes no las tienen y `_conectar` las agrega (ver `_migrar`).
+_COLUMNAS_AGREGADAS = {"caso_id": "TEXT", "variante": "TEXT", "repeticion": "INTEGER"}
 _COLUMNAS_PASO = ("orden", "herramienta", "argumentos", "duracion_ms", "exito", "tamano_salida")
 
 
@@ -83,7 +89,10 @@ def _conectar(db_path: str | Path | None = None) -> sqlite3.Connection:
             iteraciones_agente INTEGER,
             tipo_error TEXT NOT NULL CHECK (tipo_error IN ({_lista_sql(TIPOS_ERROR)})),
             modelo TEXT NOT NULL,
-            respuesta TEXT
+            respuesta TEXT,
+            caso_id TEXT,
+            variante TEXT,
+            repeticion INTEGER
         )
         """
     )
@@ -101,10 +110,30 @@ def _conectar(db_path: str | Path | None = None) -> sqlite3.Connection:
         )
         """
     )
+    _migrar(conn)
     conn.execute("CREATE INDEX IF NOT EXISTS idx_ejecuciones_fecha ON ejecuciones (fecha_utc)")
+    conn.execute(
+        "CREATE INDEX IF NOT EXISTS idx_ejecuciones_caso ON ejecuciones (origen, caso_id)"
+    )
     conn.execute("CREATE INDEX IF NOT EXISTS idx_pasos_ejecucion ON pasos (id_ejecucion)")
     conn.commit()
     return conn
+
+
+def _migrar(conn: sqlite3.Connection) -> None:
+    """Agrega las columnas que le falten a una tabla `ejecuciones` creada con
+    una versión anterior del esquema. Es idempotente y no toca los datos."""
+    existentes = {fila["name"] for fila in conn.execute("PRAGMA table_info(ejecuciones)")}
+    for columna, tipo in _COLUMNAS_AGREGADAS.items():
+        if columna in existentes:
+            continue
+        try:
+            conn.execute(f"ALTER TABLE ejecuciones ADD COLUMN {columna} {tipo}")
+        except sqlite3.OperationalError as error:
+            # Otro hilo la agregó entre el PRAGMA y el ALTER: es lo que queríamos.
+            if "duplicate column name" not in str(error).lower():
+                raise
+    conn.commit()
 
 
 def fecha_utc_ahora() -> str:
@@ -117,9 +146,15 @@ def registrar_ejecucion(
     ejecucion: dict, pasos: list[dict], db_path: str | Path | None = None
 ) -> int:
     """Inserta una ejecución y sus pasos en una sola transacción y devuelve el
-    id de la ejecución. `ejecucion["fecha_utc"]` es opcional (por defecto,
-    ahora)."""
-    fila = {"fecha_utc": fecha_utc_ahora(), **ejecucion}
+    id de la ejecución. `fecha_utc`, `caso_id`, `variante` y `repeticion` son
+    opcionales (por defecto, ahora y sin caso)."""
+    fila = {
+        "fecha_utc": fecha_utc_ahora(),
+        "caso_id": None,
+        "variante": None,
+        "repeticion": None,
+        **ejecucion,
+    }
     faltantes = [c for c in _COLUMNAS_EJECUCION if c not in fila]
     if faltantes:
         raise ValueError(f"faltan columnas de la ejecución: {faltantes}")
@@ -159,5 +194,30 @@ def purgar_anteriores_a(
     try:
         with conn:
             return conn.execute("DELETE FROM ejecuciones WHERE fecha_utc < ?", (corte,)).rowcount
+    finally:
+        conn.close()
+
+
+def combinaciones_evaluadas(db_path: str | Path | None = None) -> set[tuple[str, str, int]]:
+    """Combinaciones (caso_id, variante, repeticion) de origen "evaluacion" que
+    ya tienen una ejecución registrada. Sirve para reanudar una evaluación.
+
+    Una ejecución que terminó en ERROR por 429 o 503 NO cuenta como hecha: es
+    una falla del proveedor (cuota o disponibilidad), no un resultado del
+    agente, y la combinación debe poder reintentarse. Cualquier otro
+    desenlace, incluidos otros errores, sí cuenta.
+    """
+    conn = _conectar(db_path)
+    try:
+        filas = conn.execute(
+            """
+            SELECT DISTINCT caso_id, variante, repeticion
+            FROM ejecuciones
+            WHERE origen = 'evaluacion'
+              AND caso_id IS NOT NULL AND variante IS NOT NULL AND repeticion IS NOT NULL
+              AND NOT (estado = 'ERROR' AND tipo_error IN ('429', '503'))
+            """
+        ).fetchall()
+        return {(f["caso_id"], f["variante"], f["repeticion"]) for f in filas}
     finally:
         conn.close()

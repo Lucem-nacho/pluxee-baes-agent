@@ -1,9 +1,16 @@
 """Privacidad del registro de ejecuciones: qué se enmascara y cómo se
 anonimiza el identificador del usuario.
 
-El enmascarado es por expresiones regulares y cubre solo RUT, correo y
-teléfono chilenos. NO detecta nombres, direcciones ni otros datos personales
-escritos en texto libre, ni un RUT escrito sin guion ni puntos.
+Alcance y límites de este módulo:
+
+- El enmascarado es por expresiones regulares y cubre solo RUT, correo y
+  teléfono chilenos. NO cubre nombres ni direcciones, ni ningún otro dato
+  personal escrito en texto libre, ni un RUT escrito sin guion ni puntos.
+- El identificador del usuario queda seudonimizado (hash con sal), no
+  anonimizado: el mismo id produce siempre el mismo código.
+- Esto aplica SOLO a la base de observabilidad. `memoria.db`
+  (`memory/store.py`, la memoria de largo plazo) NO aplica este enmascarado:
+  guarda las consultas y el `id_usuario` tal como llegan.
 """
 
 import hashlib

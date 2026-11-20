@@ -70,8 +70,9 @@ with st.sidebar:
     )
     st.caption("Anótalo y vuelve a escribirlo en una sesión nueva para probarlo.")
     st.caption(
-        "Las consultas se registran de forma anónima (se enmascaran RUT, "
-        "correos y teléfonos) para monitorear el servicio."
+        "Las consultas se registran con los datos personales enmascarados "
+        "(RUT, correos y teléfonos) y tu identificador seudonimizado, para "
+        "monitorear el servicio."
     )
 
 if "mensajes" not in st.session_state:

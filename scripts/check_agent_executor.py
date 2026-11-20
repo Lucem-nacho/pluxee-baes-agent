@@ -78,7 +78,9 @@ def main() -> None:
     print(f"Consulta: {escenario['consulta']!r}")
     print(f"id_usuario: {args.id_usuario!r}\n")
 
-    resultado = responder(escenario["consulta"], args.historial, args.id_usuario)
+    resultado = responder(
+        escenario["consulta"], args.historial, args.id_usuario, origen="evaluacion"
+    )
 
     print(f"Estado: {resultado['estado']}")
     if resultado["estado"] == "INFORMATIVA":
