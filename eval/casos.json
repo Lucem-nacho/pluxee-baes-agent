@@ -42,7 +42,10 @@
         "buscar_normativa"
       ],
       "veredicto_esperado": "prohibido",
-      "fuente_esperada": "Compra de productos prohibidos tales como alcohol, tabaco y/o fármacos."
+      "fuente_esperada": "Compra de productos prohibidos tales como alcohol, tabaco y/o fármacos.",
+      "fuentes_alternativas": [
+        "¿Puedo comprar alcohol, tabaco o fármacos con la BAES?"
+      ]
     },
     {
       "id": "normativa-04a",
@@ -72,7 +75,10 @@
         "buscar_normativa"
       ],
       "veredicto_esperado": "prohibido",
-      "fuente_esperada": "Estudiantes que ofrezcan la venta del instrumento de canje, a través de la publicación de avisos en redes sociales u otros medios de difusión"
+      "fuente_esperada": "Estudiantes que ofrezcan la venta del instrumento de canje, a través de la publicación de avisos en redes sociales u otros medios de difusión",
+      "fuentes_alternativas": [
+        "Ofrecer la venta del instrumento de canje, incluso por redes sociales, es una causal de sanción definitiva que hace perder el beneficio de forma permanente."
+      ]
     },
     {
       "id": "normativa-05a",
@@ -87,7 +93,10 @@
         "buscar_normativa"
       ],
       "veredicto_esperado": "permitido",
-      "fuente_esperada": "No se aplicarán restricciones a los(as) estudiantes que efectúen cambios de carrera, pudiendo ser realizados durante cualquier mes del año académico siempre que mantenga los requisitos exigidos para la renovación de la beca."
+      "fuente_esperada": "No se aplicarán restricciones a los(as) estudiantes que efectúen cambios de carrera, pudiendo ser realizados durante cualquier mes del año académico siempre que mantenga los requisitos exigidos para la renovación de la beca.",
+      "fuentes_alternativas": [
+        "No se aplican restricciones por el cambio en sí, siempre que mantengas los requisitos de renovación. Debes solicitar el traslado en tu nueva institución para que se procese en el sistema."
+      ]
     },
     {
       "id": "normativa-05b",
@@ -117,7 +126,10 @@
         "buscar_normativa"
       ],
       "veredicto_esperado": "prohibido",
-      "fuente_esperada": "Los(as) estudiantes que durante el año en ejecución realicen pasantías en el extranjero no podrán percibir la BAES durante los meses que no residan en Chile y deberán ser suspendidos por su respectiva Institución de Educación Superior."
+      "fuente_esperada": "Los(as) estudiantes que durante el año en ejecución realicen pasantías en el extranjero no podrán percibir la BAES durante los meses que no residan en Chile y deberán ser suspendidos por su respectiva Institución de Educación Superior.",
+      "fuentes_alternativas": [
+        "El beneficio se suspende durante los meses que no residas en Chile, ya que el canje solo funciona en comercios nacionales."
+      ]
     },
     {
       "id": "normativa-06",
@@ -132,7 +144,10 @@
         "buscar_normativa"
       ],
       "veredicto_esperado": "no_confirmable",
-      "fuente_esperada": "Las fuentes no mencionan las bebidas energéticas en particular ni aclaran si las bebidas entran en la categoría de alimentos; ante la duda sobre un producto específico, conviene confirmar con un ejecutivo."
+      "fuente_esperada": "Las fuentes no mencionan las bebidas energéticas en particular ni aclaran si las bebidas entran en la categoría de alimentos; ante la duda sobre un producto específico, conviene confirmar con un ejecutivo.",
+      "fuentes_alternativas": [
+        "Las fuentes no mencionan las bebidas energéticas ni las gaseosas en particular; ante la duda sobre un producto específico, conviene confirmar con un ejecutivo."
+      ]
     },
     {
       "id": "comercio-01",
