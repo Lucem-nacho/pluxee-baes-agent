@@ -35,11 +35,14 @@ from observabilidad.eval_agente import (
     separar_pendientes,
 )
 from observabilidad.eval_recuperacion import (
+    COLUMNAS_CSV,
     evaluar,
+    formatear_detalle,
     guardar_csv,
     hit_at_k,
     mrr,
     normalizar,
+    rango_ampliado,
     rango_del_primer_acierto,
     resumir,
     separar_evaluables,
@@ -393,6 +396,40 @@ def test_cargar_casos_normaliza_la_fuente_vacia_entrega_los_avisos_y_filtra_ejem
     assert len(cargar_casos(archivo)) == 4  # sin lista de avisos también funciona
 
 
+def test_fuentes_alternativas_acepta_lista_vacia_o_ausente_y_rechaza_lo_demas():
+    assert errores_de(caso(fuentes_alternativas=["otra frase", "una más"])) == []
+    assert errores_de(caso(fuentes_alternativas=[])) == []
+    assert errores_de(caso()) == []  # ausente: el campo es opcional
+    for malo in ("una frase", [""], ["ok", "   "], [5], None, {"a": "b"}):
+        mensajes = errores_de(caso(fuentes_alternativas=malo))
+        assert any("'fuentes_alternativas' debe ser una lista de frases" in m for m in mensajes), (malo, mensajes)
+        assert all(m.startswith("caso #1") for m in mensajes)
+
+
+def test_fuentes_alternativas_sin_fuente_esperada_es_un_aviso_y_no_un_error():
+    c = caso(fuente_esperada="", fuentes_alternativas=["otra frase"])
+    assert errores_de(c) == []
+    assert any("tiene 'fuentes_alternativas' pero no 'fuente_esperada'" in a for a in avisos_de(c))
+    assert avisos_de(caso(fuentes_alternativas=["otra frase"])) == []   # con fuente: sin avisos
+    assert avisos_de(caso(fuente_esperada="", fuentes_alternativas=[])) == []
+
+
+def test_cargar_casos_deja_fuentes_alternativas_siempre_como_lista(tmp_path):
+    archivo = tmp_path / "casos.json"
+    archivo.write_text(
+        json.dumps({"casos": [caso(id="a", fuentes_alternativas=["x"]), caso(id="b", pregunta="pb"), caso(id="c", pregunta="pc", fuentes_alternativas=[])]}),
+        encoding="utf-8",
+    )
+    assert [c["fuentes_alternativas"] for c in cargar_casos(archivo)] == [["x"], [], []]
+
+
+def test_el_casos_json_del_repositorio_no_trae_alternativas_las_decide_el_estudiante():
+    datos = json.loads((RAIZ / "eval" / "casos.json").read_text(encoding="utf-8"))
+    assert all("fuentes_alternativas" not in c for c in datos["casos"])
+    assert "fuentes_alternativas" in datos["esquema"]  # pero el campo está documentado
+    assert all(c["fuentes_alternativas"] == [] for c in cargar_casos())
+
+
 # ============================================== D1. hit@k, MRR y recuperación
 
 
@@ -454,18 +491,150 @@ def test_evaluar_calcula_una_fila_por_pregunta_y_omite_casos_sin_fuente():
     assert [k for _, k in pedidos] == [7, 7, 7]          # el caso sin fuente no consulta nada
     resumen = resumir(tabla)
     assert resumen["global"]["n"] == 3
-    assert resumen["global"]["hit@3"] == pytest.approx(1 / 3)
-    assert resumen["global"]["hit@5"] == pytest.approx(2 / 3)
-    assert resumen["global"]["mrr"] == pytest.approx((1 + 0.25 + 0) / 3)
+    assert resumen["global"]["estricta"]["hit@3"] == pytest.approx(1 / 3)
+    assert resumen["global"]["estricta"]["hit@5"] == pytest.approx(2 / 3)
+    assert resumen["global"]["estricta"]["mrr"] == pytest.approx((1 + 0.25 + 0) / 3)
+    assert resumen["global"]["ampliada"] == resumen["global"]["estricta"]   # sin alternativas
     assert set(resumen["por_categoria_caso"]) == {"normativa"}
 
 
-def test_el_csv_de_recuperacion_se_guarda_con_encabezado_y_rango_vacio_si_no_hay_acierto(tmp_path):
-    tabla = evaluar([caso(variantes=[])], lambda c, k: [frag("nada", 0.1)])
+def test_rango_ampliado_acepta_la_principal_o_cualquier_alternativa_y_toma_el_mejor_rango():
+    fragmentos = [frag("sin relación", 0.1), frag("texto con la ALTERNATIVA\nuno", 0.2), frag("la principal", 0.3), frag("alt dos", 0.4)]
+
+    assert rango_del_primer_acierto(fragmentos, "la principal") == 3                    # estricto: solo la principal
+    assert rango_ampliado(fragmentos, "la principal", ["alternativa uno"]) == 2         # una alternativa llega antes
+    assert rango_ampliado(fragmentos, "la principal", ["alt dos"]) == 3                 # la principal llega antes
+    assert rango_ampliado(fragmentos, "no está", ["alt dos"]) == 4                      # solo una alternativa acierta
+    assert rango_ampliado(fragmentos, "no está", ["tampoco", "nada"]) is None
+    assert rango_ampliado(fragmentos, "la principal") == rango_ampliado(fragmentos, "la principal", []) == 3
+    # las alternativas se comparan igual que la principal: sin mayúsculas ni saltos de línea, también en el nombre de la fuente
+    assert rango_ampliado([frag("nada", 0.1, fuente="Manual\nBAES  2026")], "x", ["MANUAL baes 2026"]) == 1
+
+
+def test_evaluar_calcula_el_acierto_estricto_y_el_ampliado_por_separado():
+    casos = [
+        caso(id="a", variantes=["a v1", "a v2"], fuentes_alternativas=["frase alternativa"]),
+        caso(id="b", pregunta="pb", variantes=[], fuente_esperada="frase de b"),  # sin alternativas
+        caso(id="c", pregunta="pc", variantes=[], categoria_caso="comercio", fuente_esperada=None, fuentes_alternativas=["ignorada"]),
+    ]
+    resultados = {
+        "¿Puedo comprar alcohol?": [frag("alcohol", 0.1), frag("frase alternativa", 0.2)],      # estricto 1, ampliado 1
+        "a v1": [frag("x", 0.1), frag("y", 0.2), frag("frase alternativa", 0.3)],              # estricto no, ampliado 3
+        "a v2": [frag("x", 0.1)],                                                              # ninguno
+        "pb": [frag("x", 0.1), frag("y", 0.2), frag("z", 0.3), frag("frase de b", 0.4)],       # estricto 4, ampliado 4
+    }
+    tabla = evaluar(casos, lambda consulta, k: resultados[consulta], k=10)
+
+    assert [f["caso_id"] for f in tabla] == ["a", "a", "a", "b"]   # el caso sin fuente_esperada no se evalúa ni con alternativas
+    estrictos = [(f["rango"], f["hit@3"], f["hit@5"], round(f["rr"], 4)) for f in tabla]
+    ampliados = [(f["rango_ampliado"], f["hit@3_ampliado"], f["hit@5_ampliado"], round(f["rr_ampliado"], 4)) for f in tabla]
+    assert estrictos == [(1, 1, 1, 1.0), (None, 0, 0, 0.0), (None, 0, 0, 0.0), (4, 0, 1, 0.25)]
+    assert ampliados == [(1, 1, 1, 1.0), (3, 1, 1, 0.3333), (None, 0, 0, 0.0), (4, 0, 1, 0.25)]
+    assert [f["fuentes_alternativas"] for f in tabla] == [["frase alternativa"]] * 3 + [[]]
+
+
+def test_evaluar_solo_mira_el_top_k_aunque_el_recuperador_devuelva_mas():
+    # recuperar() busca en dos colecciones y puede devolver hasta 2*k fragmentos
+    fragmentos = [frag("x", 0.1), frag("y", 0.2), frag("z", 0.3), frag("alcohol", 0.4)]
+    [en_k4] = evaluar([caso(variantes=[])], lambda c, k: fragmentos, k=4)
+    [en_k3] = evaluar([caso(variantes=[])], lambda c, k: fragmentos, k=3)
+    assert en_k4["rango"] == 4
+    assert en_k3["rango"] is None and en_k3["rango_ampliado"] is None
+    assert len(en_k3["top"]) == 3
+
+
+def test_el_resumen_trae_estricta_y_ampliada_lado_a_lado_con_las_mismas_columnas():
+    casos = [
+        caso(id="a", pregunta="a1", variantes=["a2"], fuentes_alternativas=["alt"]),
+        caso(id="b", pregunta="b1", variantes=[], categoria_caso="comercio"),
+    ]
+    resultados = {
+        "a1": [frag("alcohol", 0.1)],                                                 # estricto 1; ampliado 1
+        "a2": [frag("x", 0.1), frag("y", 0.2), frag("z", 0.3), frag("w", 0.4), frag("alt", 0.5)],  # estricto no; ampliado 5
+        "b1": [frag("x", 0.1), frag("alcohol", 0.2)],                                 # estricto 2; ampliado 2
+    }
+    resumen = resumir(evaluar(casos, lambda c, k: resultados[c]))
+
+    g = resumen["global"]
+    assert (g["n"], g["con_alternativas"]) == (3, 2)
+    assert set(g["estricta"]) == set(g["ampliada"]) == {"hit@3", "hit@5", "mrr"}   # mismas columnas
+    assert g["estricta"]["hit@3"] == pytest.approx(2 / 3) and g["ampliada"]["hit@3"] == pytest.approx(2 / 3)
+    assert g["estricta"]["hit@5"] == pytest.approx(2 / 3) and g["ampliada"]["hit@5"] == pytest.approx(1.0)  # la alternativa la rescata en 5
+    assert g["estricta"]["mrr"] == pytest.approx((1 + 0 + 1 / 2) / 3)
+    assert g["ampliada"]["mrr"] == pytest.approx((1 + 1 / 5 + 1 / 2) / 3)
+    por_categoria = resumen["por_categoria_caso"]
+    assert set(por_categoria) == {"normativa", "comercio"}
+    assert por_categoria["normativa"]["estricta"]["mrr"] == pytest.approx(0.5)
+    assert por_categoria["normativa"]["ampliada"]["mrr"] == pytest.approx((1 + 1 / 5) / 2)
+    assert por_categoria["comercio"]["estricta"] == por_categoria["comercio"]["ampliada"]
+
+
+def test_sin_alternativas_la_ampliada_es_igual_a_la_estricta():
+    resumen = resumir(evaluar([caso(variantes=["v"])], lambda c, k: [frag("x", 0.1), frag("alcohol", 0.2)]))
+    assert resumen["global"]["estricta"] == resumen["global"]["ampliada"]
+    assert resumen["global"]["con_alternativas"] == 0
+    assert resumen["global"]["estricta"]["mrr"] == 0.5
+
+
+def fila_de(fragmentos, **cambios):
+    [fila] = evaluar([caso(variantes=[], **cambios)], lambda c, k: fragmentos)
+    return fila
+
+
+def test_formatear_detalle_muestra_los_5_primeros_con_posicion_fuente_200_caracteres_y_distancia():
+    largo = "línea uno\nlínea dos " + "x" * 400
+    fragmentos = [frag(largo, 0.1 * n, fuente=f"Fuente {n}") for n in range(1, 8)]
+    lineas = formatear_detalle(fila_de(fragmentos, fuente_esperada="no aparece"))
+
+    assert lineas[0] == "[c1] ¿Puedo comprar alcohol?" and lineas[1] == "    esperada: no aparece"
+    encabezados = [l for l in lineas if l.startswith("    ") and l[4].isdigit()]
+    assert [e.split(". ")[0].strip() for e in encabezados] == ["1", "2", "3", "4", "5"]   # solo 5, aunque lleguen 7
+    assert encabezados[0] == "    1. Fuente 1 (distancia 0.1000)"
+    assert encabezados[4] == "    5. Fuente 5 (distancia 0.5000)"
+    textos = [l.strip() for l in lineas if l.startswith("       ")]
+    assert len(textos) == 5 and all("\n" not in t for t in textos)
+    assert textos[0] == ("línea uno línea dos " + "x" * 400)[:200]   # saltos de línea convertidos en espacios, 200 caracteres
+    assert len(textos[0]) == 200
+
+
+def test_formatear_detalle_omite_la_distancia_si_no_esta_disponible_y_muestra_las_alternativas():
+    sin_distancia = [{"texto": "algo", "fuente": "Manual"}, {"texto": "otro"}]
+    lineas = formatear_detalle(fila_de(sin_distancia, fuente_esperada="no aparece", fuentes_alternativas=["tampoco"]))
+    assert "    1. Manual" in lineas and "    2. (sin fuente)" in lineas       # sin "(distancia ...)"
+    assert not any("distancia" in l for l in lineas)
+    assert any(l.startswith("    alternativas: tampoco") and "ninguna aparece tampoco" in l for l in lineas)
+
+    salvada = formatear_detalle(fila_de([frag("x", 0.1), frag("la alternativa", 0.2)], fuente_esperada="no aparece", fuentes_alternativas=["la alternativa"]))
+    assert any("la ampliada acierta en el rango 2" in l for l in salvada)
+    assert formatear_detalle(fila_de([], fuente_esperada="no aparece"))[-1] == "    (el recuperador no devolvió fragmentos)"
+
+
+def test_el_csv_incluye_el_top_3_con_fuente_y_150_caracteres_ademas_de_las_dos_metricas(tmp_path):
+    largo = "primera línea\nsegunda " + "y" * 300
+    fragmentos = [frag(largo, 0.1234567, fuente="Manual A"), frag("dos", 0.2, fuente="Manual B"), frag("tres", 0.3, fuente="Manual C"), frag("cuatro", 0.4)]
+    tabla = evaluar([caso(variantes=[], fuentes_alternativas=["dos", "otra | con barra"])], lambda c, k: fragmentos)
     ruta = guardar_csv(tabla, tmp_path / "eval" / "r.csv")
+
+    with open(ruta, encoding="utf-8-sig", newline="") as f:
+        lector = csv.DictReader(f)
+        assert tuple(lector.fieldnames) == COLUMNAS_CSV
+        [fila] = list(lector)
+    assert fila["top1_fuente"] == "Manual A" and fila["top2_fuente"] == "Manual B" and fila["top3_fuente"] == "Manual C"
+    assert fila["top1_texto"] == ("primera línea segunda " + "y" * 300)[:150] and len(fila["top1_texto"]) == 150
+    assert fila["top2_texto"] == "dos" and fila["top1_distancia"] == "0.1235"
+    assert "top4_fuente" not in fila                                 # solo el top-3
+    # estricta y ampliada en columnas separadas
+    assert (fila["rango"], fila["hit@3"], fila["rr"]) == ("", "0", "0.0")
+    assert (fila["rango_ampliado"], fila["hit@3_ampliado"], fila["hit@5_ampliado"], fila["rr_ampliado"]) == ("2", "1", "1", "0.5")
+    assert fila["fuentes_alternativas"] == "dos | otra | con barra"
+
+
+def test_el_csv_deja_vacias_las_celdas_del_top_si_hay_menos_de_3_fragmentos(tmp_path):
+    ruta = guardar_csv(evaluar([caso(variantes=[])], lambda c, k: [{"texto": "solo uno", "fuente": "M"}]), tmp_path / "r.csv")
     with open(ruta, encoding="utf-8-sig", newline="") as f:
         [fila] = list(csv.DictReader(f))
-    assert fila["rango"] == "" and fila["hit@3"] == "0" and fila["caso_id"] == "c1"
+    assert fila["top1_fuente"] == "M" and fila["top1_distancia"] == ""   # sin distancia disponible
+    assert fila["top2_fuente"] == fila["top2_texto"] == fila["top3_texto"] == ""
 
 
 # ========================================================= D2. reanudación y 429
@@ -1292,3 +1461,116 @@ def test_separar_evaluables_omite_los_casos_sin_fuente_y_evaluar_no_los_consulta
     consultas = []
     evaluar(casos, lambda c, k: consultas.append(c) or [], k=3)
     assert consultas == ["¿Puedo comprar alcohol?", "¿Se puede comprar cerveza?"]  # solo las del caso con fuente
+# ------------------------------- evaluar_recuperacion.py con un recuperador falso
+
+
+def correr_recuperacion(monkeypatch, capsys, casos, resultados, *args):
+    """Ejecuta `main()` del script en el mismo proceso, con un recuperador falso:
+    sin índice, sin modelo de embeddings y sin red."""
+    import importlib.util
+
+    from rag.retrieval import vector_retriever
+
+    consultas = []
+
+    def recuperar_falso(consulta, k=4):
+        consultas.append((consulta, k))
+        return resultados[consulta]
+
+    monkeypatch.setattr(vector_retriever, "recuperar", recuperar_falso)
+    spec = importlib.util.spec_from_file_location("evaluar_recuperacion_script", RAIZ / "scripts" / "evaluar_recuperacion.py")
+    script = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(script)
+    monkeypatch.setattr(sys, "argv", ["evaluar_recuperacion.py", "--casos-path", str(casos), *map(str, args)])
+
+    codigo = script.main()
+    salida = capsys.readouterr()
+    return codigo, salida.out, salida.err, consultas
+
+
+def casos_de_recuperacion(tmp_path, **alternativas):
+    archivo = tmp_path / "casos.json"
+    archivo.write_text(
+        json.dumps(
+            {
+                "casos": [
+                    caso(id="a", pregunta="pa", variantes=["pa2"], **alternativas),
+                    caso(id="b", pregunta="pb", variantes=[], categoria_caso="comercio", fuente_esperada="frase de b"),
+                    caso(id="c", pregunta="pc", variantes=[], categoria_caso="derivacion", fuente_esperada=""),
+                ]
+            }
+        ),
+        encoding="utf-8",
+    )
+    return archivo
+
+
+RESULTADOS_CLI = {
+    "pa": [frag("alcohol", 0.1, fuente="Manual A")],                                                     # acierta
+    "pa2": [frag("otra cosa", 0.1, fuente="Manual B"), frag("regla\nalternativa", 0.2, fuente="Manual C")],  # solo la alternativa
+    "pb": [frag("nada de nada", 0.1, fuente="Manual D")],                                                # no acierta
+}
+
+
+def test_evaluar_recuperacion_imprime_estricta_y_ampliada_lado_a_lado(monkeypatch, capsys, tmp_path):
+    casos = casos_de_recuperacion(tmp_path, fuentes_alternativas=["regla alternativa"])
+    salida_csv = tmp_path / "r.csv"
+
+    codigo, out, err, consultas = correr_recuperacion(monkeypatch, capsys, casos, RESULTADOS_CLI, "--salida", salida_csv)
+
+    assert codigo == 0 and err == ""
+    assert [c for c, _ in consultas] == ["pa", "pa2", "pb"] and {k for _, k in consultas} == {10}   # el caso c no tiene fuente
+    assert "Omití 1 caso(s) sin 'fuente_esperada' (no dependen del índice vectorial): c" in out
+    assert "ESTRICTA (fuente_esperada)" in out and "AMPLIADA (+ fuentes_alternativas)" in out
+    [global_] = [l for l in out.splitlines() if l.strip().startswith("GLOBAL")]
+    estricta, ampliada = global_.split("|")[1:]
+    assert "hit@3  33.3%" in estricta and "hit@5  33.3%" in estricta and "MRR 0.333" in estricta   # solo pa acierta
+    assert "hit@3  66.7%" in ampliada and "hit@5  66.7%" in ampliada and "MRR 0.500" in ampliada   # pa y pa2 (rango 2)
+    assert "La ampliada usa las fuentes_alternativas de 2 de las 3 consulta(s)." in out
+    assert "[a] pa2 (la ampliada acierta en el rango 2)" in out and "[b] pb" in out
+    assert salida_csv.exists()
+    with open(salida_csv, encoding="utf-8-sig", newline="") as f:
+        tabla = list(csv.DictReader(f))
+    assert [(f["caso_id"], f["rango"], f["rango_ampliado"]) for f in tabla] == [("a", "1", "1"), ("a", "", "2"), ("b", "", "")]
+
+
+def test_evaluar_recuperacion_sin_alternativas_avisa_que_las_dos_metricas_coinciden(monkeypatch, capsys, tmp_path):
+    codigo, out, _, _ = correr_recuperacion(monkeypatch, capsys, casos_de_recuperacion(tmp_path), RESULTADOS_CLI, "--salida", tmp_path / "r.csv")
+    assert codigo == 0 and "Ningún caso tiene 'fuentes_alternativas': la métrica ampliada es igual a la estricta." in out
+    [global_] = [l for l in out.splitlines() if l.strip().startswith("GLOBAL")]
+    estricta, ampliada = global_.split("|")[1:]
+    assert estricta.strip() == ampliada.strip()
+
+
+def test_detalle_imprime_los_fragmentos_solo_de_las_consultas_sin_acierto_estricto(monkeypatch, capsys, tmp_path):
+    casos = casos_de_recuperacion(tmp_path, fuentes_alternativas=["regla alternativa"])
+    codigo, out, _, _ = correr_recuperacion(monkeypatch, capsys, casos, RESULTADOS_CLI, "--salida", tmp_path / "r.csv", "--detalle")
+
+    assert codigo == 0
+    detalle = out.split("Detalle:")[1]
+    assert "[a] pa2" in detalle and "[b] pb" in detalle
+    assert "[a] pa\n" not in detalle                                   # pa acierta: no se detalla
+    assert "    1. Manual B (distancia 0.1000)" in detalle and "    2. Manual C (distancia 0.2000)" in detalle
+    assert "       regla alternativa" in detalle                      # el salto de línea del fragmento se vuelve espacio
+    assert "(la ampliada acierta en el rango 2)" in detalle
+    assert "usa --detalle" not in out
+
+
+def test_sin_detalle_solo_se_sugiere_la_opcion(monkeypatch, capsys, tmp_path):
+    codigo, out, _, _ = correr_recuperacion(monkeypatch, capsys, casos_de_recuperacion(tmp_path), RESULTADOS_CLI, "--salida", tmp_path / "r.csv")
+    assert codigo == 0 and "Detalle:" not in out and "(usa --detalle para ver los fragmentos que sí se recuperaron)" in out
+    assert "Manual D" not in out   # los fragmentos recuperados no se imprimen sin --detalle
+
+
+def test_detalle_respeta_k_y_no_imprime_nada_si_todo_acierta(monkeypatch, capsys, tmp_path):
+    todos = {"pa": [frag("alcohol", 0.1)], "pa2": [frag("alcohol", 0.1)], "pb": [frag("frase de b", 0.1)]}
+    codigo, out, _, consultas = correr_recuperacion(
+        monkeypatch, capsys, casos_de_recuperacion(tmp_path), todos, "--salida", tmp_path / "r.csv", "--detalle", "--k", "7"
+    )
+    assert codigo == 0 and {k for _, k in consultas} == {7}
+    assert "Sin acierto" not in out and "Detalle:" not in out
+
+
+def test_evaluar_recuperacion_rechaza_un_k_invalido(db_observabilidad):
+    r = correr("evaluar_recuperacion.py", "--k", "0", db_path=db_observabilidad)
+    assert r.returncode == 2 and "--k debe ser al menos 1" in r.stderr

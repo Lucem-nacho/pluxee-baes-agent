@@ -43,7 +43,7 @@ CAMPOS_OBLIGATORIOS = (
 # `fuente_esperada` puede faltar, ser null o ser texto vacío: el caso simplemente
 # no se evalúa en recuperación. `preparacion` son consultas que se ejecutan antes
 # del caso con el mismo id_usuario (ver eval_agente.py).
-CAMPOS_OPCIONALES = ("fuente_esperada", "ejemplo", "notas", "preparacion")
+CAMPOS_OPCIONALES = ("fuente_esperada", "fuentes_alternativas", "ejemplo", "notas", "preparacion")
 
 # Los ids que terminan así quedan reservados para las ejecuciones de preparación.
 SUFIJO_PREPARACION = "-prep"
@@ -143,6 +143,10 @@ def _validar_caso(caso: object, posicion: int, ids_vistos: set[str]) -> list[str
     fuente = caso.get("fuente_esperada")
     if fuente is not None and not isinstance(fuente, str):
         errores.append(f"{nombre}: 'fuente_esperada' debe ser un texto, o vacío/null si el caso no se evalúa en recuperación")
+    if "fuentes_alternativas" in caso:
+        alternativas = caso["fuentes_alternativas"]
+        if not isinstance(alternativas, list) or not all(isinstance(a, str) and a.strip() for a in alternativas):
+            errores.append(f"{nombre}: 'fuentes_alternativas' debe ser una lista de frases (textos no vacíos); puede ser []")
     if "preparacion" in caso:
         preparacion = caso["preparacion"]
         if not isinstance(preparacion, list) or not all(isinstance(p, str) and p.strip() for p in preparacion):
@@ -192,6 +196,13 @@ def advertencias_de_casos(datos: object) -> list[str]:
                     f"(¿error de tipeo? campos válidos: {_opciones(conocidos)})"
                 )
 
+        fuente = caso.get("fuente_esperada")
+        if caso.get("fuentes_alternativas") and not (isinstance(fuente, str) and fuente.strip()):
+            avisos.append(
+                f"{nombre}: tiene 'fuentes_alternativas' pero no 'fuente_esperada'; el caso se omite de la "
+                "evaluación de recuperación y las alternativas no se usan"
+            )
+
         categoria = caso.get("categoria_esperada")
         veredicto = caso.get("veredicto_esperado")
         herramientas = caso.get("herramientas_esperadas")
@@ -226,7 +237,8 @@ def cargar_casos(
     pasa una lista en `advertencias`, se le agregan los avisos (ver arriba).
 
     `fuente_esperada` queda siempre presente: None cuando falta, es null o es
-    texto en blanco."""
+    texto en blanco. `fuentes_alternativas` queda siempre presente: lista
+    (vacía cuando falta)."""
     ruta = Path(ruta or RUTA_CASOS)
     origen = str(ruta)
     try:
@@ -250,6 +262,7 @@ def cargar_casos(
     for caso in casos:
         fuente = caso.get("fuente_esperada")
         caso["fuente_esperada"] = fuente if isinstance(fuente, str) and fuente.strip() else None
+        caso["fuentes_alternativas"] = list(caso.get("fuentes_alternativas") or [])
     return casos if incluir_ejemplos else [c for c in casos if not c.get("ejemplo")]
 
 
