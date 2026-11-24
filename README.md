@@ -48,6 +48,63 @@ evita que Streamlit escanee innecesariamente los submódulos de la librería
 inofensivas en la terminal y una carga inicial más lenta (pantalla en negro
 por varios segundos antes de que aparezca la interfaz — no es un error).
 
+## Observabilidad (EP3)
+Cada respuesta del agente (desde `app.py` o desde la evaluación) queda
+registrada en `data/processed/observabilidad.db`: latencia por etapa, tokens,
+llamadas al LLM, los pasos del agente (herramienta, argumentos, duración,
+éxito) y el tipo de error. Las consultas y respuestas se guardan con los datos
+personales enmascarados y el identificador de usuario anonimizado. El
+dashboard lee esa base y los archivos de `data/processed/eval/`.
+
+**1. Generar datos.** Estos comandos se corren desde la raíz del proyecto:
+```bash
+# Recuperación (sin LLM, no gasta cuota): deja un CSV en data/processed/eval/
+python scripts/evaluar_recuperacion.py
+# ...e imprime los fragmentos recuperados de cada consulta sin acierto
+python scripts/evaluar_recuperacion.py --detalle
+
+# Agente (llama a Gemini): una corrida acotada, gastando la cuota en orden de prioridad
+python scripts/evaluar_agente.py --solo-principal --orden --repeticiones 1
+# Todas las preguntas con 3 repeticiones (varios días con el nivel gratuito; es reanudable)
+python scripts/evaluar_agente.py --orden --repeticiones 3
+
+# Métricas: imprime el resumen y guarda data/processed/eval/metricas.json
+python scripts/calcular_metricas.py
+```
+`evaluar_agente.py` consume cuota de Gemini (unas 3-4 solicitudes por ejecución
+y alrededor de 20 por día en el nivel gratuito): se detiene solo tras 3
+respuestas 429 seguidas y, al volver a correrlo, retoma lo que faltaba. Imprime
+el modelo activo al empezar. `calcular_metricas.py` y `evaluar_recuperacion.py`
+no llaman a Gemini.
+
+**2. Etiquetas del estudiante.** La primera vez, `calcular_metricas.py` crea la
+plantilla `data/processed/eval/etiquetas.csv` con una fila por respuesta: llena
+la columna `correcto` (`1`, `0` o `parcial`) y vuelve a correrlo. Sin
+etiquetas, el dashboard avisa que faltan y deja vacía la precisión de veredicto.
+
+**3. Abrir el dashboard.**
+```bash
+python -m streamlit run dashboard.py --server.fileWatcherType none
+```
+Muestra indicadores, latencia (p50 y p95 por etapa y por herramienta), errores
+por tipo y por fecha, calidad por categoría de caso, la recuperación estricta
+vs. ampliada del último CSV y un explorador de trazas. Los filtros de la barra
+lateral (fecha, origen, modelo, estado y tipo de error) indican siempre cuántas
+ejecuciones quedan. Solo lee: si la base no existe o está vacía, lo avisa y no
+la crea.
+
+**4. Purgar los registros.** Borra las ejecuciones (y sus pasos) con más de N
+días; por defecto, 30:
+```bash
+python scripts/purgar_observabilidad.py --dias 30
+```
+
+**5. Pruebas.** No usan Gemini ni escriben en las bases reales (memoria y
+observabilidad):
+```bash
+python -m pytest tests/
+```
+
 ## Estructura
 - `agent/` — clasificador, generador (EP1), orquestador (EP2:
   `AgentExecutor`), tools del agente (EP2: `tools.py`), escalamiento (EP1,
@@ -60,6 +117,12 @@ por varios segundos antes de que aparezca la interfaz — no es un error).
 - `prompts/` — `clasificador.py` y `generador.py` (EP1), `agente.py` (EP2:
   system prompt del `AgentExecutor`)
 - `data/` — fuentes (manual BAES real, FAQ, comercios simulados, social mock)
+- `observabilidad/` — **EP3**: registro de ejecuciones (SQLite), métricas,
+  casos y evaluación de recuperación, y la lógica de datos del dashboard
+- `eval/casos.json` — **EP3**: casos de evaluación (preguntas, variantes,
+  respuesta esperada)
+- `dashboard.py` — **EP3**: dashboard de observabilidad (Streamlit)
+- `scripts/` — verificaciones, ingesta y los scripts de evaluación y métricas
 - `docs/arquitectura.md` — decisiones de diseño y limitaciones con evidencia,
   EP1 y EP2
 

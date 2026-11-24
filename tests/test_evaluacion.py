@@ -423,11 +423,16 @@ def test_cargar_casos_deja_fuentes_alternativas_siempre_como_lista(tmp_path):
     assert [c["fuentes_alternativas"] for c in cargar_casos(archivo)] == [["x"], [], []]
 
 
-def test_el_casos_json_del_repositorio_no_trae_alternativas_las_decide_el_estudiante():
+def test_el_casos_json_del_repositorio_documenta_y_valida_las_fuentes_alternativas():
     datos = json.loads((RAIZ / "eval" / "casos.json").read_text(encoding="utf-8"))
-    assert all("fuentes_alternativas" not in c for c in datos["casos"])
-    assert "fuentes_alternativas" in datos["esquema"]  # pero el campo está documentado
-    assert all(c["fuentes_alternativas"] == [] for c in cargar_casos())
+    assert "fuentes_alternativas" in datos["esquema"]          # el campo está documentado
+    avisos = []
+    casos = cargar_casos(advertencias=avisos)                  # y lo que el estudiante agregó es válido
+    assert avisos == []
+    assert all(isinstance(c["fuentes_alternativas"], list) for c in casos)   # siempre una lista, vacía si falta
+    for c in casos:
+        if c["fuentes_alternativas"]:
+            assert c["fuente_esperada"], c["id"]               # las alternativas solo tienen sentido con fuente principal
 
 
 # ============================================== D1. hit@k, MRR y recuperación
