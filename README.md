@@ -79,8 +79,11 @@ no llaman a Gemini.
 
 **2. Etiquetas del estudiante.** La primera vez, `calcular_metricas.py` crea la
 plantilla `data/processed/eval/etiquetas.csv` con una fila por respuesta: llena
-la columna `correcto` (`1`, `0` o `parcial`) y vuelve a correrlo. Sin
-etiquetas, el dashboard avisa que faltan y deja vacía la precisión de veredicto.
+la columna `correcto` (`1`, `0` o `parcial`) y vuelve a correrlo. En las
+corridas siguientes agrega al final las ejecuciones nuevas, sin tocar lo ya
+etiquetado, e informa cuántas agregó. Si lo editas con Excel, guárdalo como
+CSV UTF-8 y ciérralo antes de volver a correr el script. Sin etiquetas, el
+dashboard avisa que faltan y deja vacía la precisión de veredicto.
 
 **3. Abrir el dashboard.**
 ```bash

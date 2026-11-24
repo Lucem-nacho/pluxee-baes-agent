@@ -31,7 +31,9 @@ Definiciones:
   herramienta, o solo `escalar_a_ejecutivo`, siempre que el estado final sea
   ESCALAR (cualquier otra herramienta antes de derivar cuenta como fallo).
 - precisión de veredicto: viene de las etiquetas del estudiante (CSV con
-  `id_ejecucion`, `correcto` = 1 | 0 | parcial, `comentario`). `precision_estricta`
+  `id_ejecucion`, `correcto` = 1 | 0 | parcial, `comentario`). El archivo solo
+  crece: `agregar_filas_de_etiquetas` añade al final las ejecuciones completas
+  que falten y nunca reescribe lo que ya tiene. `precision_estricta`
   = correctas / etiquetadas; `precision_ponderada` cuenta `parcial` como 0,5.
 - consistencia: para cada (caso, variante) con 2 o más repeticiones, qué
   fracción de las repeticiones coincide con la más frecuente, en veredicto, en
@@ -51,6 +53,7 @@ Definiciones:
 """
 
 import csv
+import io
 import json
 import math
 import unicodedata
@@ -74,6 +77,9 @@ COLUMNAS_ETIQUETAS = (
     "respuesta",
 )
 VALORES_CORRECTO = ("1", "0", "parcial")
+# Excel en español usa ';' como separador de listas: con comas, el archivo se abre
+# entero en la columna A. Los archivos que ya existen conservan su separador.
+SEPARADOR_PLANTILLA = ";"
 _PESO_CORRECTO = {"1": 1.0, "parcial": 0.5, "0": 0.0}
 
 _MARCAS_NO_CONFIRMABLE = (
@@ -237,14 +243,26 @@ def _delimitador(primera_linea: str) -> str:
     return ";" if primera_linea.count(";") > primera_linea.count(",") else ","
 
 
+def _leer_texto(ruta: Path) -> str:
+    """El contenido del CSV tal cual (sin traducir saltos de línea), en utf-8-sig."""
+    try:
+        with open(ruta, newline="", encoding="utf-8-sig") as archivo:
+            return archivo.read()
+    except UnicodeDecodeError:
+        raise ErrorEtiquetas(
+            ["el archivo no está en UTF-8 (Excel lo hace al guardar como 'CSV' a secas): "
+             "guárdalo como 'CSV UTF-8' y vuelve a correr"],
+            str(ruta),
+        ) from None
+
+
 def leer_etiquetas(ruta: str | Path) -> dict[int, dict]:
     """{id_ejecucion: {"correcto", "comentario", "veredicto_observado"}} de las
     filas ya etiquetadas (`correcto` no vacío). Lanza `ErrorEtiquetas` con la
     línea de cada problema."""
     ruta = Path(ruta)
     origen = str(ruta)
-    with open(ruta, newline="", encoding="utf-8-sig") as archivo:
-        contenido = archivo.read()
+    contenido = _leer_texto(ruta)
     if not contenido.strip():
         return {}
     lector = csv.DictReader(contenido.splitlines(), delimiter=_delimitador(contenido.splitlines()[0]))
@@ -283,25 +301,84 @@ def leer_etiquetas(ruta: str | Path) -> dict[int, dict]:
     return etiquetas
 
 
-def generar_plantilla_etiquetas(ruta: str | Path, casos: list[dict], ejecuciones: list[dict]) -> int:
-    """Crea el CSV de etiquetas con una fila por ejecución completa, con
-    `correcto` y `comentario` vacíos y columnas de contexto (caso, pregunta,
-    veredicto esperado, respuesta) para poder etiquetar sin abrir la base.
-    Devuelve cuántas filas escribió."""
-    consideradas = seleccionar(casos, ejecuciones)[0]
-    unicas = deduplicar([e for e in consideradas if e["estado"] != "ERROR"])
+def _filas_para_etiquetar(casos: list[dict], ejecuciones: list[dict]) -> list[dict]:
+    """Una fila (columna -> valor) por cada ejecución COMPLETA de la evaluación,
+    en orden de id, con `correcto` y `comentario` vacíos y columnas de contexto
+    (caso, pregunta, veredicto esperado, respuesta) para etiquetar sin abrir la base."""
+    completas = [e for e in seleccionar(casos, ejecuciones)[0] if e["estado"] != "ERROR"]
     esperado = {c["id"]: c["veredicto_esperado"] for c in casos}
+    return [
+        {
+            "id_ejecucion": e["id"],
+            "correcto": "",
+            "comentario": "",
+            "caso_id": e["caso_id"],
+            "variante": e["variante"],
+            "repeticion": e["repeticion"],
+            "veredicto_esperado": esperado[e["caso_id"]],
+            "modelo": e["modelo"],
+            "respuesta": e["respuesta"] or "",
+        }
+        for e in sorted(completas, key=lambda e: e["id"])
+    ]
 
+
+def generar_plantilla_etiquetas(ruta: str | Path, casos: list[dict], ejecuciones: list[dict]) -> int:
+    """Crea (o sobrescribe) el CSV de etiquetas, en utf-8-sig y separado por ';',
+    con una fila por ejecución completa. Para un archivo que ya existe usa
+    `agregar_filas_de_etiquetas`, que no toca lo que tiene. Devuelve cuántas filas escribió."""
+    filas = _filas_para_etiquetar(casos, ejecuciones)
     ruta = Path(ruta)
     ruta.parent.mkdir(parents=True, exist_ok=True)
     with open(ruta, "w", newline="", encoding="utf-8-sig") as archivo:
-        escritor = csv.writer(archivo)
+        escritor = csv.writer(archivo, delimiter=SEPARADOR_PLANTILLA)
         escritor.writerow(COLUMNAS_ETIQUETAS)
-        for e in unicas:
-            escritor.writerow(
-                [e["id"], "", "", e["caso_id"], e["variante"], e["repeticion"], esperado[e["caso_id"]], e["modelo"], e["respuesta"] or ""]
-            )
-    return len(unicas)
+        for fila in filas:
+            escritor.writerow([fila[c] for c in COLUMNAS_ETIQUETAS])
+    return len(filas)
+
+
+def agregar_filas_de_etiquetas(ruta: str | Path, casos: list[dict], ejecuciones: list[dict]) -> int:
+    """Añade AL FINAL de un CSV de etiquetas existente una fila por cada ejecución
+    completa cuyo `id_ejecucion` no esté todavía. No reescribe, reordena ni
+    modifica nada de lo que ya hay: solo escribe después del último byte, con el
+    separador, el orden de columnas y el fin de línea del propio archivo (las
+    columnas que no conoce quedan vacías). Un archivo totalmente vacío recibe
+    también el encabezado. Si no hay nada nuevo, no se abre para escribir.
+    Si el archivo tiene errores (los de `leer_etiquetas`) lanza `ErrorEtiquetas`
+    sin tocarlo. Devuelve cuántas filas agregó."""
+    ruta = Path(ruta)
+    leer_etiquetas(ruta)  # se valida ANTES de escribir
+    contenido = _leer_texto(ruta)
+    if not contenido.strip():
+        return generar_plantilla_etiquetas(ruta, casos, ejecuciones)
+
+    separador = _delimitador(contenido.splitlines()[0])
+    lector = csv.reader(io.StringIO(contenido, newline=""), delimiter=separador)
+    encabezado = next(lector)
+    columna_id = encabezado.index("id_ejecucion")
+    presentes: set[int] = set()
+    for fila in lector:  # con csv.reader, una respuesta de varias líneas sigue siendo una sola fila
+        try:
+            presentes.add(int(fila[columna_id].strip()))
+        except (IndexError, ValueError):
+            continue  # filas en blanco o sin un id legible
+
+    nuevas = [f for f in _filas_para_etiquetar(casos, ejecuciones) if f["id_ejecucion"] not in presentes]
+    if not nuevas:
+        return 0
+
+    fin_de_linea = "\n" if "\n" in contenido and "\r\n" not in contenido else "\r\n"
+    texto = io.StringIO(newline="")
+    if not contenido.endswith(("\n", "\r")):
+        texto.write(fin_de_linea)  # la última fila no terminaba en salto de línea
+    escritor = csv.writer(texto, delimiter=separador, lineterminator=fin_de_linea)
+    for fila in nuevas:
+        escritor.writerow([fila.get(columna, "") for columna in encabezado])
+    # al anexar no va marca BOM: la que haya ya está al comienzo del archivo
+    with open(ruta, "a", newline="", encoding="utf-8") as archivo:
+        archivo.write(texto.getvalue())
+    return len(nuevas)
 
 
 # ------------------------------------------------------------------- cálculo

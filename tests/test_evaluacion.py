@@ -11,6 +11,7 @@ import itertools
 import json
 import os
 import sqlite3
+import stat
 import subprocess
 import sys
 import threading
@@ -49,6 +50,7 @@ from observabilidad.eval_recuperacion import (
 )
 from observabilidad.metricas import (
     ErrorEtiquetas,
+    agregar_filas_de_etiquetas,
     calcular,
     cargar_ejecuciones,
     generar_plantilla_etiquetas,
@@ -1062,7 +1064,7 @@ def test_la_plantilla_de_etiquetas_trae_una_fila_por_ejecucion_completa_y_correc
 
     assert escritas == 5   # sin la que falló con 429 ni el ruido
     with open(ruta, encoding="utf-8-sig", newline="") as f:
-        lector = csv.DictReader(f)
+        lector = csv.DictReader(f, delimiter=";")
         assert lector.fieldnames[:3] == ["id_ejecucion", "correcto", "comentario"]
         tabla = list(lector)
     assert [int(f["id_ejecucion"]) for f in tabla] == [ids["A_pa_1"], ids["A_pa_2"], ids["A_pa2_1"], ids["B_1"], ids["B_2"]]
@@ -1144,7 +1146,7 @@ def test_la_plantilla_de_etiquetas_incluye_el_modelo_de_cada_ejecucion(db_observ
     ruta = tmp_path / "etiquetas.csv"
     generar_plantilla_etiquetas(ruta, CASOS_METRICAS, cargar_ejecuciones(db_observabilidad))
     with open(ruta, encoding="utf-8-sig", newline="") as f:
-        tabla = list(csv.DictReader(f))
+        tabla = list(csv.DictReader(f, delimiter=";"))
     assert [fila["modelo"] for fila in tabla] == ["modelo-a", "modelo-b"]
 
 
@@ -1335,7 +1337,7 @@ def test_calcular_metricas_genera_la_plantilla_calcula_y_escribe_el_json(db_obse
 
     # el estudiante etiqueta una fila; la segunda corrida NO pisa el archivo y la lee
     texto = etiquetas.read_text(encoding="utf-8-sig").splitlines()
-    texto[1] = texto[1].replace(f"{ids['A_pa_1']},,", f"{ids['A_pa_1']},1,", 1)
+    texto[1] = texto[1].replace(f"{ids['A_pa_1']};;", f"{ids['A_pa_1']};1;", 1)
     etiquetas.write_text("\n".join(texto), encoding="utf-8-sig")
     segunda = correr("calcular_metricas.py", *args, db_path=db_observabilidad)
     assert segunda.returncode == 0, segunda.stderr
@@ -1579,3 +1581,225 @@ def test_detalle_respeta_k_y_no_imprime_nada_si_todo_acierta(monkeypatch, capsys
 def test_evaluar_recuperacion_rechaza_un_k_invalido(db_observabilidad):
     r = correr("evaluar_recuperacion.py", "--k", "0", db_path=db_observabilidad)
     assert r.returncode == 2 and "--k debe ser al menos 1" in r.stderr
+
+
+# ------------------------------------------- etiquetas.csv: solo se agregan filas
+
+
+IDS_COMPLETAS = ["A_pa_1", "A_pa_2", "A_pa2_1", "B_1", "B_2"]  # lo completo de sembrar_metricas (sin errores ni ruido)
+BOM = b"\xef\xbb\xbf"
+
+
+def tabla_etiquetas(ruta, separador=";"):
+    with open(ruta, encoding="utf-8-sig", newline="") as f:
+        return list(csv.DictReader(f, delimiter=separador))
+
+
+def agregar(ruta, db, casos=None):
+    return agregar_filas_de_etiquetas(ruta, casos or CASOS_METRICAS, cargar_ejecuciones(db))
+
+
+def correr_metricas(tmp_path, db, etiquetas):
+    casos = tmp_path / "casos_metricas.json"
+    casos.write_text(json.dumps({"casos": CASOS_METRICAS}), encoding="utf-8")
+    return correr(
+        "calcular_metricas.py", "--casos-path", casos, "--etiquetas", etiquetas,
+        "--salida", tmp_path / "metricas.json", db_path=db,
+    )
+
+
+def test_con_el_archivo_ausente_se_crea_la_plantilla_con_punto_y_coma_y_utf8_con_bom(db_observabilidad, tmp_path):
+    ids = sembrar_metricas(db_observabilidad)
+    etiquetas = tmp_path / "eval" / "etiquetas.csv"
+
+    r = correr_metricas(tmp_path, db_observabilidad, etiquetas)
+
+    assert r.returncode == 0, r.stderr
+    assert "generé la plantilla con 5 fila(s)" in r.stdout
+    crudo = etiquetas.read_bytes()
+    assert crudo.startswith(BOM + b"id_ejecucion;correcto;comentario;")   # Excel en español lo abre en columnas
+    tabla = tabla_etiquetas(etiquetas)
+    assert [int(f["id_ejecucion"]) for f in tabla] == [ids[n] for n in IDS_COMPLETAS]
+    assert all(f["correcto"] == "" and f["comentario"] == "" for f in tabla)
+
+
+@pytest.mark.parametrize("separador", [";", ","])
+@pytest.mark.parametrize("fin_de_linea", ["\r\n", "\n", ""])  # "" = sin salto de línea al final
+def test_un_archivo_solo_con_encabezado_se_llena_conservando_su_separador(db_observabilidad, tmp_path, separador, fin_de_linea):
+    ids = sembrar_metricas(db_observabilidad)
+    ruta = tmp_path / "etiquetas.csv"
+    original = BOM + (separador.join(["id_ejecucion", "correcto", "comentario", "caso_id", "variante", "repeticion",
+                                      "veredicto_esperado", "modelo", "respuesta"]) + fin_de_linea).encode("utf-8")
+    ruta.write_bytes(original)
+
+    assert agregar(ruta, db_observabilidad) == 5
+
+    nuevo = ruta.read_bytes()
+    assert nuevo.startswith(original)                       # el encabezado queda byte a byte
+    assert nuevo.count(BOM) == 1                            # no se mete otra marca en medio
+    tabla = tabla_etiquetas(ruta, separador)
+    assert [int(f["id_ejecucion"]) for f in tabla] == [ids[n] for n in IDS_COMPLETAS]
+    assert all(f["correcto"] == "" and f["comentario"] == "" for f in tabla)
+    assert tabla[0]["caso_id"] == "A" and tabla[0]["variante"] == "pa" and tabla[0]["veredicto_esperado"] == "prohibido"
+    assert "No puedes" in tabla[0]["respuesta"]
+    if fin_de_linea == "\n":
+        assert b"\r\n" not in nuevo                          # respeta el fin de línea del archivo
+    assert leer_etiquetas(ruta) == {}
+
+
+def test_el_script_llena_el_archivo_con_solo_encabezado_e_informa_cuantas_filas_agrego(db_observabilidad, tmp_path):
+    sembrar_metricas(db_observabilidad)
+    ruta = tmp_path / "etiquetas.csv"
+    ruta.write_bytes(BOM + b"id_ejecucion,correcto,comentario,caso_id,variante,repeticion,veredicto_esperado,modelo,respuesta\r\n")
+
+    r = correr_metricas(tmp_path, db_observabilidad, ruta)
+
+    assert r.returncode == 0, r.stderr
+    assert "agregué 5 fila(s) nueva(s)" in r.stdout and "Llena la columna 'correcto'" in r.stdout
+    assert len(tabla_etiquetas(ruta, ",")) == 5
+
+
+def test_un_archivo_totalmente_vacio_recibe_el_encabezado_y_las_filas(db_observabilidad, tmp_path):
+    sembrar_metricas(db_observabilidad)
+    ruta = tmp_path / "etiquetas.csv"
+    ruta.write_bytes(b"")
+    assert agregar(ruta, db_observabilidad) == 5
+    assert ruta.read_bytes().startswith(BOM + b"id_ejecucion;correcto;")
+    assert len(tabla_etiquetas(ruta)) == 5
+
+
+def test_se_conservan_las_etiquetas_llenas_y_se_agregan_solo_las_ejecuciones_nuevas(db_observabilidad, tmp_path):
+    ids = sembrar_metricas(db_observabilidad)
+    ruta = tmp_path / "etiquetas.csv"
+    assert correr_metricas(tmp_path, db_observabilidad, ruta).returncode == 0
+
+    # el estudiante llena etiquetas (con tildes, un ';' y comillas en el comentario)
+    texto = ruta.read_bytes().decode("utf-8-sig")
+    texto = texto.replace(f"\n{ids['A_pa_1']};;;", f'\n{ids["A_pa_1"]};1;"está bien; ""ok""";', 1)
+    texto = texto.replace(f"\n{ids['B_1']};;;", f"\n{ids['B_1']};parcial;revisar;", 1)
+    ruta.write_bytes(texto.encode("utf-8-sig"))
+    antes = ruta.read_bytes()
+    etiquetas_antes = leer_etiquetas(ruta)
+    assert set(etiquetas_antes) == {ids["A_pa_1"], ids["B_1"]}
+
+    # llegan ejecuciones nuevas: dos completas y varias que no corresponde etiquetar
+    nueva_a = registrar(db_observabilidad, "A", "pa", 4)
+    nueva_b = registrar(db_observabilidad, "B", "pb", 3, estado="ESCALAR", categoria="ESCALAR", respuesta=None)
+    registrar(db_observabilidad, "A", "pa", 5, estado="ERROR", tipo_error="503", respuesta=None)   # no completa
+    registrar(db_observabilidad, "A", "pa", 6, origen="app")                                       # no es evaluación
+    registrar(db_observabilidad, "A-prep", "consulta de preparación", 2)                           # preparación
+    registrar(db_observabilidad, None, "humo", None)                                               # sin caso
+
+    r = correr_metricas(tmp_path, db_observabilidad, ruta)
+
+    assert r.returncode == 0, r.stderr
+    assert "agregué 2 fila(s) nueva(s)" in r.stdout
+    despues = ruta.read_bytes()
+    assert despues.startswith(antes)                       # lo anterior no se movió ni un byte
+    tabla = tabla_etiquetas(ruta)
+    assert [int(f["id_ejecucion"]) for f in tabla] == [ids[n] for n in IDS_COMPLETAS] + [nueva_a, nueva_b]
+    assert [f["correcto"] for f in tabla[-2:]] == ["", ""] and [f["comentario"] for f in tabla[-2:]] == ["", ""]
+    assert leer_etiquetas(ruta) == etiquetas_antes          # las etiquetas llenas siguen iguales
+    assert leer_etiquetas(ruta)[ids["A_pa_1"]]["comentario"] == 'está bien; "ok"'
+    veredicto = json.loads((tmp_path / "metricas.json").read_text(encoding="utf-8"))["precision_veredicto"]
+    assert (veredicto["etiquetadas"], veredicto["correctas"], veredicto["parciales"]) == (2, 1, 1)
+
+
+def test_correr_dos_veces_seguidas_no_duplica_filas_ni_toca_el_archivo(db_observabilidad, tmp_path):
+    sembrar_metricas(db_observabilidad)
+    ruta = tmp_path / "etiquetas.csv"
+    ruta.write_bytes(BOM + b"id_ejecucion;correcto;comentario\r\n")
+
+    primera = correr_metricas(tmp_path, db_observabilidad, ruta)
+    contenido, modificado = ruta.read_bytes(), ruta.stat().st_mtime_ns
+    segunda = correr_metricas(tmp_path, db_observabilidad, ruta)
+    tercera = correr_metricas(tmp_path, db_observabilidad, ruta)
+
+    assert "agregué 5 fila(s)" in primera.stdout
+    assert segunda.returncode == 0 and "agregué 0 fila(s)" in segunda.stdout and "agregué 0 fila(s)" in tercera.stdout
+    assert "Llena la columna" not in segunda.stdout
+    assert ruta.read_bytes() == contenido and ruta.stat().st_mtime_ns == modificado
+    ids = [f["id_ejecucion"] for f in tabla_etiquetas(ruta)]
+    assert len(ids) == len(set(ids)) == 5
+
+
+def test_las_filas_nuevas_siguen_el_orden_de_columnas_del_archivo(db_observabilidad, tmp_path):
+    ids = sembrar_metricas(db_observabilidad)
+    ruta = tmp_path / "etiquetas.csv"
+    # reordenadas, con la columna opcional y una propia, sin las de contexto, y filas en desorden
+    original = (
+        "correcto;id_ejecucion;mis_notas;veredicto_observado;caso_id\r\n"
+        f"0;{ids['B_1']};nota B;derivar;B\r\n"
+        f"1;{ids['A_pa_1']};nota A;;A\r\n"
+        ";;;;\r\n"  # Excel suele dejar filas en blanco
+    ).encode("utf-8-sig")
+    ruta.write_bytes(original)
+
+    assert agregar(ruta, db_observabilidad) == 3
+
+    assert ruta.read_bytes().startswith(original)
+    tabla = tabla_etiquetas(ruta)
+    nuevas = tabla[-3:]
+    assert [int(f["id_ejecucion"]) for f in nuevas] == [ids["A_pa_2"], ids["A_pa2_1"], ids["B_2"]]
+    assert [f["caso_id"] for f in nuevas] == ["A", "A", "B"]
+    assert all(f["correcto"] == f["mis_notas"] == f["veredicto_observado"] == "" for f in nuevas)
+    assert leer_etiquetas(ruta)[ids["B_1"]]["veredicto_observado"] == "derivar"
+
+
+def test_una_respuesta_de_varias_lineas_no_se_confunde_con_filas_ya_presentes(db_observabilidad, tmp_path):
+    primero = registrar(db_observabilidad, "A", "pa", 1, respuesta="línea uno\nlínea dos")
+    ruta = tmp_path / "etiquetas.csv"
+    generar_plantilla_etiquetas(ruta, CASOS_METRICAS, cargar_ejecuciones(db_observabilidad))
+    segundo = primero + 1
+    # una respuesta ya guardada que, partida por líneas, "parece" tener la fila del siguiente id
+    ruta.write_bytes(ruta.read_bytes().replace("línea dos".encode(), f"línea dos\r\n{segundo};1;falsa".encode()))
+    assert registrar(db_observabilidad, "A", "pa", 2) == segundo
+
+    assert agregar(ruta, db_observabilidad) == 1
+    assert [int(f["id_ejecucion"]) for f in tabla_etiquetas(ruta)] == [primero, segundo]
+
+
+def test_cada_ejecucion_completa_tiene_su_fila_aunque_repita_caso_y_repeticion(db_observabilidad, tmp_path):
+    uno = registrar(db_observabilidad, "A", "pa", 1)
+    dos = registrar(db_observabilidad, "A", "pa", 1)
+    ruta = tmp_path / "etiquetas.csv"
+    ruta.write_bytes(BOM + b"id_ejecucion;correcto;comentario\r\n")
+    assert agregar(ruta, db_observabilidad) == 2
+    assert [int(f["id_ejecucion"]) for f in tabla_etiquetas(ruta)] == [uno, dos]
+
+
+@pytest.mark.parametrize(
+    "contenido, mensaje",
+    [
+        (BOM + b"id_ejecucion;correcto;comentario\r\n1;quizas;\r\n", "'correcto' = 'quizas' no es v"),
+        (BOM + b"id;correcto\r\n1;1\r\n", "faltan las columnas ['id_ejecucion']"),
+        ("id_ejecucion;correcto;comentario\r\n1;1;está mal\r\n".encode("cp1252"), "CSV UTF-8"),
+    ],
+    ids=["etiqueta_invalida", "sin_columna_id", "guardado_en_ansi"],
+)
+def test_un_archivo_con_problemas_no_se_modifica_y_el_script_lo_explica(db_observabilidad, tmp_path, contenido, mensaje):
+    sembrar_metricas(db_observabilidad)
+    ruta = tmp_path / "etiquetas.csv"
+    ruta.write_bytes(contenido)
+
+    r = correr_metricas(tmp_path, db_observabilidad, ruta)
+
+    assert r.returncode == 2 and mensaje in r.stderr and "Traceback" not in r.stderr
+    assert ruta.read_bytes() == contenido and not (tmp_path / "metricas.json").exists()
+    with pytest.raises(ErrorEtiquetas):
+        agregar(ruta, db_observabilidad)
+    assert ruta.read_bytes() == contenido
+
+
+def test_si_el_archivo_no_se_puede_escribir_el_script_pide_cerrarlo(db_observabilidad, tmp_path):
+    sembrar_metricas(db_observabilidad)
+    ruta = tmp_path / "etiquetas.csv"
+    contenido = BOM + b"id_ejecucion;correcto;comentario\r\n"
+    ruta.write_bytes(contenido)
+    ruta.chmod(stat.S_IREAD)  # como cuando Excel lo tiene bloqueado
+    try:
+        r = correr_metricas(tmp_path, db_observabilidad, ruta)
+    finally:
+        ruta.chmod(stat.S_IREAD | stat.S_IWRITE)
+    assert r.returncode == 2 and "ciérralo" in r.stderr and "Traceback" not in r.stderr
+    assert ruta.read_bytes() == contenido

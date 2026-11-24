@@ -15,7 +15,11 @@ script lo advierte; compara usando `por_modelo`. Las consultas de preparación
 La precisión de veredicto sale de las etiquetas que llena el estudiante en
 data/processed/eval/etiquetas.csv (columnas id_ejecucion, correcto = 1 | 0 |
 parcial, comentario). Si el archivo no existe, se genera una plantilla con una
-fila por ejecución y `correcto` vacío; llénala y vuelve a correr el script.
+fila por ejecución completa y `correcto` vacío. Si ya existe, antes de calcular
+se le agregan al final las ejecuciones completas que falten, sin tocar las filas
+ni las etiquetas que ya tiene, y se informa cuántas se agregaron. Se puede
+editar con Excel en español (coma o punto y coma, guardado como CSV UTF-8);
+ciérralo en Excel antes de correr el script.
 
 Uso:
     python scripts/calcular_metricas.py
@@ -33,6 +37,7 @@ from config import settings
 from observabilidad.casos import ErrorEsquema, cargar_casos
 from observabilidad.metricas import (
     ErrorEtiquetas,
+    agregar_filas_de_etiquetas,
     calcular,
     cargar_ejecuciones,
     generar_plantilla_etiquetas,
@@ -65,16 +70,24 @@ def main() -> int:
     ejecuciones = cargar_ejecuciones()
 
     etiquetas_path = Path(args.etiquetas)
-    if etiquetas_path.exists():
-        try:
+    try:
+        if etiquetas_path.exists():
+            agregadas = agregar_filas_de_etiquetas(etiquetas_path, casos, ejecuciones)
+            print(f"Etiquetas: agregué {agregadas} fila(s) nueva(s) a {etiquetas_path}.")
+            if agregadas:
+                print("Llena la columna 'correcto' (1, 0 o parcial) de las filas nuevas y vuelve a correr.")
+            print()
             etiquetas = leer_etiquetas(etiquetas_path)
-        except ErrorEtiquetas as error:
-            print(error, file=sys.stderr)
-            return 2
-    else:
-        escritas = generar_plantilla_etiquetas(etiquetas_path, casos, ejecuciones)
-        etiquetas = {}
-        print(f"No existía {etiquetas_path}: generé la plantilla con {escritas} fila(s). Llena la columna 'correcto' (1, 0 o parcial) y vuelve a correr.\n")
+        else:
+            escritas = generar_plantilla_etiquetas(etiquetas_path, casos, ejecuciones)
+            etiquetas = {}
+            print(f"No existía {etiquetas_path}: generé la plantilla con {escritas} fila(s). Llena la columna 'correcto' (1, 0 o parcial) y vuelve a correr.\n")
+    except ErrorEtiquetas as error:
+        print(error, file=sys.stderr)
+        return 2
+    except PermissionError:
+        print(f"No pude escribir en {etiquetas_path}: si está abierto en Excel, ciérralo y vuelve a correr.", file=sys.stderr)
+        return 2
 
     metricas = calcular(casos, ejecuciones, etiquetas)
     salida = guardar_json(metricas, args.salida)
