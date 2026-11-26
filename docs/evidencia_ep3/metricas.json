@@ -1,0 +1,671 @@
+{
+  "ejecuciones": {
+    "evaluacion_total": 22,
+    "sin_caso_excluidas": 0,
+    "preparacion_excluidas": 1,
+    "fuera_del_conjunto_excluidas": 0,
+    "consideradas": 21,
+    "completas": 12,
+    "con_error": 9,
+    "unicas": 12
+  },
+  "precision_clasificacion": {
+    "n": 12,
+    "correctas": 12,
+    "precision": 1.0
+  },
+  "precision_herramientas": {
+    "n": 12,
+    "correctas": 8,
+    "precision": 0.6666666666666666
+  },
+  "precision_veredicto": {
+    "etiquetadas": 12,
+    "correctas": 9,
+    "parciales": 1,
+    "incorrectas": 2,
+    "sin_etiquetar": 0,
+    "etiquetas_de_ejecuciones_ajenas": 0,
+    "precision_estricta": 0.75,
+    "precision_ponderada": 0.7916666666666666
+  },
+  "consistencia": {
+    "grupos_evaluables": 0,
+    "grupos_sin_repeticion": 12,
+    "repeticiones": 0,
+    "mismo_veredicto": null,
+    "misma_secuencia": null,
+    "ambos": null,
+    "por_caso": {}
+  },
+  "tasa_errores": {
+    "ejecuciones": 21,
+    "por_tipo": {
+      "ninguno": {
+        "n": 12,
+        "tasa": 0.5714285714285714
+      },
+      "429": {
+        "n": 3,
+        "tasa": 0.14285714285714285
+      },
+      "503": {
+        "n": 6,
+        "tasa": 0.2857142857142857
+      },
+      "limite_iteraciones": {
+        "n": 0,
+        "tasa": 0.0
+      },
+      "sin_respuesta": {
+        "n": 0,
+        "tasa": 0.0
+      },
+      "clasificador_no_interpretable": {
+        "n": 0,
+        "tasa": 0.0
+      },
+      "otro": {
+        "n": 0,
+        "tasa": 0.0
+      }
+    }
+  },
+  "latencia_ms": {
+    "por_etapa": {
+      "total": {
+        "n": 12,
+        "p50_ms": 81488.5,
+        "p95_ms": 520878.1
+      },
+      "clasificador": {
+        "n": 12,
+        "p50_ms": 22669.0,
+        "p95_ms": 344139.1
+      },
+      "agente": {
+        "n": 10,
+        "p50_ms": 38637.0,
+        "p95_ms": 252247.65
+      }
+    },
+    "por_herramienta": {
+      "buscar_comercio": {
+        "n": 4,
+        "p50_ms": 1.5,
+        "p95_ms": 10.5
+      },
+      "buscar_normativa": {
+        "n": 12,
+        "p50_ms": 117.0,
+        "p95_ms": 7134.65
+      },
+      "consultar_historial": {
+        "n": 1,
+        "p50_ms": 5.0,
+        "p95_ms": 5.0
+      }
+    }
+  },
+  "consumo_por_consulta": {
+    "consultas": 12,
+    "llamadas_llm_promedio": 2.92,
+    "tokens_entrada_promedio": 3899.1,
+    "tokens_salida_promedio": 721.2,
+    "consultas_con_tokens": 10
+  },
+  "por_caso": {
+    "comercio-01": {
+      "ejecuciones": 1,
+      "precision_clasificacion": 1.0,
+      "precision_herramientas": 0.0,
+      "consistencia": null,
+      "consumo": {
+        "consultas": 1,
+        "llamadas_llm_promedio": 3.0,
+        "tokens_entrada_promedio": 3201.0,
+        "tokens_salida_promedio": 550.0,
+        "consultas_con_tokens": 1
+      }
+    },
+    "comercio-02": {
+      "ejecuciones": 1,
+      "precision_clasificacion": 1.0,
+      "precision_herramientas": 0.0,
+      "consistencia": null,
+      "consumo": {
+        "consultas": 1,
+        "llamadas_llm_promedio": 3.0,
+        "tokens_entrada_promedio": 3321.0,
+        "tokens_salida_promedio": 773.0,
+        "consultas_con_tokens": 1
+      }
+    },
+    "comercio-03": {
+      "ejecuciones": 1,
+      "precision_clasificacion": 1.0,
+      "precision_herramientas": 0.0,
+      "consistencia": null,
+      "consumo": {
+        "consultas": 1,
+        "llamadas_llm_promedio": 4.0,
+        "tokens_entrada_promedio": 5860.0,
+        "tokens_salida_promedio": 922.0,
+        "consultas_con_tokens": 1
+      }
+    },
+    "derivacion-01": {
+      "ejecuciones": 1,
+      "precision_clasificacion": 1.0,
+      "precision_herramientas": 1.0,
+      "consistencia": null,
+      "consumo": {
+        "consultas": 1,
+        "llamadas_llm_promedio": 1.0,
+        "tokens_entrada_promedio": null,
+        "tokens_salida_promedio": null,
+        "consultas_con_tokens": 0
+      }
+    },
+    "derivacion-02": {
+      "ejecuciones": 1,
+      "precision_clasificacion": 1.0,
+      "precision_herramientas": 1.0,
+      "consistencia": null,
+      "consumo": {
+        "consultas": 1,
+        "llamadas_llm_promedio": 1.0,
+        "tokens_entrada_promedio": null,
+        "tokens_salida_promedio": null,
+        "consultas_con_tokens": 0
+      }
+    },
+    "memoria-01": {
+      "ejecuciones": 1,
+      "precision_clasificacion": 1.0,
+      "precision_herramientas": 1.0,
+      "consistencia": null,
+      "consumo": {
+        "consultas": 1,
+        "llamadas_llm_promedio": 3.0,
+        "tokens_entrada_promedio": 2389.0,
+        "tokens_salida_promedio": 276.0,
+        "consultas_con_tokens": 1
+      }
+    },
+    "normativa-02": {
+      "ejecuciones": 1,
+      "precision_clasificacion": 1.0,
+      "precision_herramientas": 0.0,
+      "consistencia": null,
+      "consumo": {
+        "consultas": 1,
+        "llamadas_llm_promedio": 3.0,
+        "tokens_entrada_promedio": 3439.0,
+        "tokens_salida_promedio": 854.0,
+        "consultas_con_tokens": 1
+      }
+    },
+    "normativa-03": {
+      "ejecuciones": 1,
+      "precision_clasificacion": 1.0,
+      "precision_herramientas": 1.0,
+      "consistencia": null,
+      "consumo": {
+        "consultas": 1,
+        "llamadas_llm_promedio": 3.0,
+        "tokens_entrada_promedio": 3153.0,
+        "tokens_salida_promedio": 515.0,
+        "consultas_con_tokens": 1
+      }
+    },
+    "normativa-04a": {
+      "ejecuciones": 1,
+      "precision_clasificacion": 1.0,
+      "precision_herramientas": 1.0,
+      "consistencia": null,
+      "consumo": {
+        "consultas": 1,
+        "llamadas_llm_promedio": 3.0,
+        "tokens_entrada_promedio": 2850.0,
+        "tokens_salida_promedio": 600.0,
+        "consultas_con_tokens": 1
+      }
+    },
+    "normativa-05b": {
+      "ejecuciones": 1,
+      "precision_clasificacion": 1.0,
+      "precision_herramientas": 1.0,
+      "consistencia": null,
+      "consumo": {
+        "consultas": 1,
+        "llamadas_llm_promedio": 4.0,
+        "tokens_entrada_promedio": 5975.0,
+        "tokens_salida_promedio": 803.0,
+        "consultas_con_tokens": 1
+      }
+    },
+    "normativa-05c": {
+      "ejecuciones": 1,
+      "precision_clasificacion": 1.0,
+      "precision_herramientas": 1.0,
+      "consistencia": null,
+      "consumo": {
+        "consultas": 1,
+        "llamadas_llm_promedio": 3.0,
+        "tokens_entrada_promedio": 2954.0,
+        "tokens_salida_promedio": 724.0,
+        "consultas_con_tokens": 1
+      }
+    },
+    "normativa-06": {
+      "ejecuciones": 1,
+      "precision_clasificacion": 1.0,
+      "precision_herramientas": 1.0,
+      "consistencia": null,
+      "consumo": {
+        "consultas": 1,
+        "llamadas_llm_promedio": 4.0,
+        "tokens_entrada_promedio": 5849.0,
+        "tokens_salida_promedio": 1195.0,
+        "consultas_con_tokens": 1
+      }
+    }
+  },
+  "modelos": [
+    "gemini-3.6-flash",
+    "gemini-flash-latest"
+  ],
+  "por_modelo": {
+    "gemini-3.6-flash": {
+      "ejecuciones": {
+        "evaluacion_total": 18,
+        "sin_caso_excluidas": 0,
+        "preparacion_excluidas": 1,
+        "fuera_del_conjunto_excluidas": 0,
+        "consideradas": 17,
+        "completas": 9,
+        "con_error": 8,
+        "unicas": 9
+      },
+      "precision_clasificacion": {
+        "n": 9,
+        "correctas": 9,
+        "precision": 1.0
+      },
+      "precision_herramientas": {
+        "n": 9,
+        "correctas": 7,
+        "precision": 0.7777777777777778
+      },
+      "precision_veredicto": {
+        "etiquetadas": 9,
+        "correctas": 7,
+        "parciales": 1,
+        "incorrectas": 1,
+        "sin_etiquetar": 0,
+        "etiquetas_de_ejecuciones_ajenas": 0,
+        "precision_estricta": 0.7777777777777778,
+        "precision_ponderada": 0.8333333333333334
+      },
+      "consistencia": {
+        "grupos_evaluables": 0,
+        "grupos_sin_repeticion": 9,
+        "repeticiones": 0,
+        "mismo_veredicto": null,
+        "misma_secuencia": null,
+        "ambos": null,
+        "por_caso": {}
+      },
+      "tasa_errores": {
+        "ejecuciones": 17,
+        "por_tipo": {
+          "ninguno": {
+            "n": 9,
+            "tasa": 0.5294117647058824
+          },
+          "429": {
+            "n": 3,
+            "tasa": 0.17647058823529413
+          },
+          "503": {
+            "n": 5,
+            "tasa": 0.29411764705882354
+          },
+          "limite_iteraciones": {
+            "n": 0,
+            "tasa": 0.0
+          },
+          "sin_respuesta": {
+            "n": 0,
+            "tasa": 0.0
+          },
+          "clasificador_no_interpretable": {
+            "n": 0,
+            "tasa": 0.0
+          },
+          "otro": {
+            "n": 0,
+            "tasa": 0.0
+          }
+        }
+      },
+      "latencia_ms": {
+        "por_etapa": {
+          "total": {
+            "n": 9,
+            "p50_ms": 59234.0,
+            "p95_ms": 415955.8
+          },
+          "clasificador": {
+            "n": 9,
+            "p50_ms": 18779.0,
+            "p95_ms": 396365.6
+          },
+          "agente": {
+            "n": 8,
+            "p50_ms": 34592.0,
+            "p95_ms": 77931.6
+          }
+        },
+        "por_herramienta": {
+          "buscar_comercio": {
+            "n": 2,
+            "p50_ms": 1.5,
+            "p95_ms": 1.95
+          },
+          "buscar_normativa": {
+            "n": 9,
+            "p50_ms": 117.0,
+            "p95_ms": 7182.0
+          },
+          "consultar_historial": {
+            "n": 1,
+            "p50_ms": 5.0,
+            "p95_ms": 5.0
+          }
+        }
+      },
+      "consumo_por_consulta": {
+        "consultas": 9,
+        "llamadas_llm_promedio": 3.0,
+        "tokens_entrada_promedio": 3741.25,
+        "tokens_salida_promedio": 717.5,
+        "consultas_con_tokens": 8
+      },
+      "por_caso": {
+        "comercio-02": {
+          "ejecuciones": 1,
+          "precision_clasificacion": 1.0,
+          "precision_herramientas": 0.0,
+          "consistencia": null,
+          "consumo": {
+            "consultas": 1,
+            "llamadas_llm_promedio": 3.0,
+            "tokens_entrada_promedio": 3321.0,
+            "tokens_salida_promedio": 773.0,
+            "consultas_con_tokens": 1
+          }
+        },
+        "derivacion-01": {
+          "ejecuciones": 1,
+          "precision_clasificacion": 1.0,
+          "precision_herramientas": 1.0,
+          "consistencia": null,
+          "consumo": {
+            "consultas": 1,
+            "llamadas_llm_promedio": 1.0,
+            "tokens_entrada_promedio": null,
+            "tokens_salida_promedio": null,
+            "consultas_con_tokens": 0
+          }
+        },
+        "memoria-01": {
+          "ejecuciones": 1,
+          "precision_clasificacion": 1.0,
+          "precision_herramientas": 1.0,
+          "consistencia": null,
+          "consumo": {
+            "consultas": 1,
+            "llamadas_llm_promedio": 3.0,
+            "tokens_entrada_promedio": 2389.0,
+            "tokens_salida_promedio": 276.0,
+            "consultas_con_tokens": 1
+          }
+        },
+        "normativa-02": {
+          "ejecuciones": 1,
+          "precision_clasificacion": 1.0,
+          "precision_herramientas": 0.0,
+          "consistencia": null,
+          "consumo": {
+            "consultas": 1,
+            "llamadas_llm_promedio": 3.0,
+            "tokens_entrada_promedio": 3439.0,
+            "tokens_salida_promedio": 854.0,
+            "consultas_con_tokens": 1
+          }
+        },
+        "normativa-03": {
+          "ejecuciones": 1,
+          "precision_clasificacion": 1.0,
+          "precision_herramientas": 1.0,
+          "consistencia": null,
+          "consumo": {
+            "consultas": 1,
+            "llamadas_llm_promedio": 3.0,
+            "tokens_entrada_promedio": 3153.0,
+            "tokens_salida_promedio": 515.0,
+            "consultas_con_tokens": 1
+          }
+        },
+        "normativa-04a": {
+          "ejecuciones": 1,
+          "precision_clasificacion": 1.0,
+          "precision_herramientas": 1.0,
+          "consistencia": null,
+          "consumo": {
+            "consultas": 1,
+            "llamadas_llm_promedio": 3.0,
+            "tokens_entrada_promedio": 2850.0,
+            "tokens_salida_promedio": 600.0,
+            "consultas_con_tokens": 1
+          }
+        },
+        "normativa-05b": {
+          "ejecuciones": 1,
+          "precision_clasificacion": 1.0,
+          "precision_herramientas": 1.0,
+          "consistencia": null,
+          "consumo": {
+            "consultas": 1,
+            "llamadas_llm_promedio": 4.0,
+            "tokens_entrada_promedio": 5975.0,
+            "tokens_salida_promedio": 803.0,
+            "consultas_con_tokens": 1
+          }
+        },
+        "normativa-05c": {
+          "ejecuciones": 1,
+          "precision_clasificacion": 1.0,
+          "precision_herramientas": 1.0,
+          "consistencia": null,
+          "consumo": {
+            "consultas": 1,
+            "llamadas_llm_promedio": 3.0,
+            "tokens_entrada_promedio": 2954.0,
+            "tokens_salida_promedio": 724.0,
+            "consultas_con_tokens": 1
+          }
+        },
+        "normativa-06": {
+          "ejecuciones": 1,
+          "precision_clasificacion": 1.0,
+          "precision_herramientas": 1.0,
+          "consistencia": null,
+          "consumo": {
+            "consultas": 1,
+            "llamadas_llm_promedio": 4.0,
+            "tokens_entrada_promedio": 5849.0,
+            "tokens_salida_promedio": 1195.0,
+            "consultas_con_tokens": 1
+          }
+        }
+      }
+    },
+    "gemini-flash-latest": {
+      "ejecuciones": {
+        "evaluacion_total": 4,
+        "sin_caso_excluidas": 0,
+        "preparacion_excluidas": 0,
+        "fuera_del_conjunto_excluidas": 0,
+        "consideradas": 4,
+        "completas": 3,
+        "con_error": 1,
+        "unicas": 3
+      },
+      "precision_clasificacion": {
+        "n": 3,
+        "correctas": 3,
+        "precision": 1.0
+      },
+      "precision_herramientas": {
+        "n": 3,
+        "correctas": 1,
+        "precision": 0.3333333333333333
+      },
+      "precision_veredicto": {
+        "etiquetadas": 3,
+        "correctas": 2,
+        "parciales": 0,
+        "incorrectas": 1,
+        "sin_etiquetar": 0,
+        "etiquetas_de_ejecuciones_ajenas": 0,
+        "precision_estricta": 0.6666666666666666,
+        "precision_ponderada": 0.6666666666666666
+      },
+      "consistencia": {
+        "grupos_evaluables": 0,
+        "grupos_sin_repeticion": 3,
+        "repeticiones": 0,
+        "mismo_veredicto": null,
+        "misma_secuencia": null,
+        "ambos": null,
+        "por_caso": {}
+      },
+      "tasa_errores": {
+        "ejecuciones": 4,
+        "por_tipo": {
+          "ninguno": {
+            "n": 3,
+            "tasa": 0.75
+          },
+          "429": {
+            "n": 0,
+            "tasa": 0.0
+          },
+          "503": {
+            "n": 1,
+            "tasa": 0.25
+          },
+          "limite_iteraciones": {
+            "n": 0,
+            "tasa": 0.0
+          },
+          "sin_respuesta": {
+            "n": 0,
+            "tasa": 0.0
+          },
+          "clasificador_no_interpretable": {
+            "n": 0,
+            "tasa": 0.0
+          },
+          "otro": {
+            "n": 0,
+            "tasa": 0.0
+          }
+        }
+      },
+      "latencia_ms": {
+        "por_etapa": {
+          "total": {
+            "n": 3,
+            "p50_ms": 208242.0,
+            "p95_ms": 415791.9
+          },
+          "clasificador": {
+            "n": 3,
+            "p50_ms": 70709.0,
+            "p95_ms": 121246.7
+          },
+          "agente": {
+            "n": 2,
+            "p50_ms": 245619.5,
+            "p95_ms": 305272.85
+          }
+        },
+        "por_herramienta": {
+          "buscar_comercio": {
+            "n": 2,
+            "p50_ms": 6.5,
+            "p95_ms": 11.45
+          },
+          "buscar_normativa": {
+            "n": 3,
+            "p50_ms": 124.0,
+            "p95_ms": 6118.9
+          }
+        }
+      },
+      "consumo_por_consulta": {
+        "consultas": 3,
+        "llamadas_llm_promedio": 2.67,
+        "tokens_entrada_promedio": 4530.5,
+        "tokens_salida_promedio": 736.0,
+        "consultas_con_tokens": 2
+      },
+      "por_caso": {
+        "comercio-01": {
+          "ejecuciones": 1,
+          "precision_clasificacion": 1.0,
+          "precision_herramientas": 0.0,
+          "consistencia": null,
+          "consumo": {
+            "consultas": 1,
+            "llamadas_llm_promedio": 3.0,
+            "tokens_entrada_promedio": 3201.0,
+            "tokens_salida_promedio": 550.0,
+            "consultas_con_tokens": 1
+          }
+        },
+        "comercio-03": {
+          "ejecuciones": 1,
+          "precision_clasificacion": 1.0,
+          "precision_herramientas": 0.0,
+          "consistencia": null,
+          "consumo": {
+            "consultas": 1,
+            "llamadas_llm_promedio": 4.0,
+            "tokens_entrada_promedio": 5860.0,
+            "tokens_salida_promedio": 922.0,
+            "consultas_con_tokens": 1
+          }
+        },
+        "derivacion-02": {
+          "ejecuciones": 1,
+          "precision_clasificacion": 1.0,
+          "precision_herramientas": 1.0,
+          "consistencia": null,
+          "consumo": {
+            "consultas": 1,
+            "llamadas_llm_promedio": 1.0,
+            "tokens_entrada_promedio": null,
+            "tokens_salida_promedio": null,
+            "consultas_con_tokens": 0
+          }
+        }
+      }
+    }
+  },
+  "aviso_modelos": "Hay ejecuciones de 2 modelos (gemini-3.6-flash, gemini-flash-latest): el bloque global los mezcla y no representa a ninguno; compara usando 'por_modelo'."
+}

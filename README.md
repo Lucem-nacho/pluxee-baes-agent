@@ -108,6 +108,14 @@ observabilidad):
 python -m pytest tests/
 ```
 
+**Evidencia de la entrega.** Los archivos de `docs/evidencia_ep3/` son la
+evidencia de la EP3: las métricas, las etiquetas, el último CSV de recuperación,
+la base de las ejecuciones de evaluación y la salida de las pruebas. Para ver el
+dashboard con esos datos, copia `observabilidad_evaluacion.db` a
+`data/processed/observabilidad.db`, y `etiquetas.csv` y `recuperacion_*.csv` a
+`data/processed/eval/` (crea las carpetas si no existen; si ya tienes datos
+propios con esos nombres, respáldalos antes porque se reemplazan).
+
 ## Estructura
 - `agent/` — clasificador, generador (EP1), orquestador (EP2:
   `AgentExecutor`), tools del agente (EP2: `tools.py`), escalamiento (EP1,
